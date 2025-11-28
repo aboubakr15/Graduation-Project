@@ -37,6 +37,11 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'main',
+    'professor',
+    'student',
+    'teacher_assistant',
+    'administrator',
 ]
 
 MIDDLEWARE = [
@@ -72,11 +77,17 @@ WSGI_APPLICATION = 'GraduationProject.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+AUTH_USER_MODEL = 'main.User'
+
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': "eduera",
+        'USER': "root",
+        'PASSWORD': "Admin123",
+        'HOST': "localhost",
+        'PORT': "3306",
+    },
 }
 
 

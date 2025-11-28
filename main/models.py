@@ -1,5 +1,5 @@
 from django.db import models
-from django.contrib.auth.models import AbstractUser, Group
+from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.core.validators import MinValueValidator, MaxValueValidator
 import uuid
 from datetime import datetime
@@ -15,6 +15,13 @@ class User(AbstractUser):
     class Gender(models.TextChoices):
         MALE = 'M', 'Male'
         FEMALE = 'F', 'Female'
+
+    class Current_Level(models.TextChoices):
+        ONE = '1', 'Level 1'
+        TWO = '2', 'Level 2'
+        THREE = '3', 'Level 3'
+        FOUR = '4', 'Level 4'
+        FIVE = '5', 'Level 5'
     
     # Remove default first_name and last_name
     first_name = None
@@ -22,7 +29,6 @@ class User(AbstractUser):
     
     guid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     full_name = models.CharField(max_length=255)
-    full_name_en = models.CharField(max_length=255, blank=True, null=True)
     department = models.ForeignKey('Department', on_delete=models.SET_NULL, null=True, blank=True, related_name='users')
     gender = models.CharField(max_length=1, choices=Gender.choices, blank=True, null=True)
     primary_role = models.CharField(max_length=20, choices=Role.choices)
@@ -30,12 +36,31 @@ class User(AbstractUser):
     
     # Student-specific fields
     student_id = models.CharField(max_length=20, null=True, blank=True, unique=True, db_index=True)
-    current_gpa = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0.0), MaxValueValidator(4.0)])
-    
+    student_current_level = models.IntegerField(choices=Current_Level.choices,null=True, blank=True)
+    current_gpa = models.DecimalField(
+        max_digits=4,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0.0), MaxValueValidator(4.0)]
+    )
+        
+    groups = models.ManyToManyField(
+        Group,
+        related_name='main_users',
+        blank=True,
+    )
+
+    user_permissions = models.ManyToManyField(
+        Permission,
+        related_name='main_user_permissions',
+        blank=True,
+    )
+
     # Streak tracking
     current_streak = models.IntegerField(default=0)
     longest_streak = models.IntegerField(default=0)
-    last_login = models.DateTimeField(null=True, blank=True)  # To track daily logins for streaks
+    # already exists in django / last_login = models.DateTimeField(null=True, blank=True)  # To track daily logins for streaks
     
     # Timestamps
     is_active = models.BooleanField(default=True)
@@ -111,6 +136,7 @@ class CourseOffering(models.Model):
     tas = models.ManyToManyField(User, related_name='assisted_courses', limit_choices_to={'primary_role': User.Role.TA}, blank=True)
     capacity = models.IntegerField(default=30)
     enrollment_count = models.IntegerField(default=0)
+    course_schedule = models.JSONField(default=list, blank=True)  # [{"day": "Monday", "time": "10:00-11:30"}, ...]
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
@@ -192,12 +218,16 @@ class Assignment(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     description_material = models.ForeignKey(CourseMaterial, on_delete=models.SET_NULL, null=True, blank=True, related_name='related_assignments')
+
+    # if auto correctable, store questions and model answers as JSON
+    is_auto_correctable = models.BooleanField(default=False)
     questions = models.JSONField(default=list, blank=True)  # Structured representation of questions if assignment type is QUIZ/EXAM
+    model_answers = models.JSONField(default=dict, blank=True)  # Structured data for auto-grading
+    
     due_date = models.DateTimeField()
     total_points = models.DecimalField(max_digits=6, decimal_places=2,validators=[MinValueValidator(0)])
     assignment_type = models.CharField(max_length=20, choices=AssignmentType.choices)
     submission_location = models.CharField(max_length=20, choices=SubmissionLocation.choices, default=SubmissionLocation.ONLINE)
-    is_auto_correctable = models.BooleanField(default=False)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_assignments')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -223,9 +253,8 @@ class StudentSubmission(models.Model):
     student = models.ForeignKey(User, on_delete=models.CASCADE,related_name='submissions', limit_choices_to={'primary_role': User.Role.STUDENT})
     submission_date = models.DateTimeField(auto_now_add=True)
     file_url = models.URLField(null=True, blank=True)
-    model_answers = models.JSONField(default=dict, blank=True)  # Structured data for auto-grading
     student_answers = models.JSONField(default=dict, blank=True)
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    status = models.CharField(max_length=20, choices=Status.choices)
     notes = models.TextField(blank=True)
     
     class Meta:
@@ -337,7 +366,7 @@ class Announcement(models.Model):
         db_table = 'announcements'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['-created_at', 'priority']),
+            models.Index(fields=['-created_at']),
             models.Index(fields=['course_offering', '-created_at']),
         ]
     
@@ -352,7 +381,6 @@ class Notification(models.Model):
         MATERIAL_UPLOAD = 'MATERIAL_UPLOAD', 'Material Upload'
         ASSIGNMENT_DUE = 'ASSIGNMENT_DUE', 'Assignment Due'
         GRADE_POSTED = 'GRADE_POSTED', 'Grade Posted'
-        CHAT_RESPONSE = 'CHAT_RESPONSE', 'Chat Response'
         GENERAL = 'GENERAL', 'General'
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
@@ -376,6 +404,11 @@ class Notification(models.Model):
 
 
 class TodoItem(models.Model):
+    class Priority(models.TextChoices):
+        LOW = 'LOW', 'Low'
+        MEDIUM = 'MEDIUM', 'Medium'
+        HIGH = 'HIGH', 'High'
+
     announcement = models.ForeignKey(Announcement, on_delete=models.CASCADE, related_name='todo_items', null=True, blank=True)
     student = models.ForeignKey(User, on_delete=models.CASCADE, related_name='todo_items', limit_choices_to={'primary_role': User.Role.STUDENT})
     title = models.CharField(max_length=255)
@@ -383,13 +416,13 @@ class TodoItem(models.Model):
     due_date = models.DateTimeField(null=True, blank=True)
     is_completed = models.BooleanField(default=False)
     related_assignment = models.ForeignKey(Assignment, on_delete=models.CASCADE, null=True, blank=True, related_name='todo_items')
-    display_order = models.IntegerField(default=0)  # For drag-and-drop ordering
+    priority = models.CharField(max_length=10, choices=Priority.choices, default=Priority.LOW)
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     
     class Meta:
         db_table = 'todo_items'
-        ordering = ['display_order', 'due_date']
+        ordering = ['due_date']
         indexes = [
             models.Index(fields=['student', 'is_completed']),
         ]
@@ -412,5 +445,4 @@ class SemesterGPA(models.Model):
     
     def __str__(self):
         return f"{self.student.full_name} - {self.semester} {self.year}: {self.gpa}"
-
 
