@@ -76,11 +76,11 @@ AUTH_USER_MODEL = 'main.User'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': "eduera",
-        'USER': "root",
-        'PASSWORD': "Admin123",
-        'HOST': "localhost",
-        'PORT': "3306",
+        'NAME': os.environ.get('MYSQLDATABASE', 'eduera'),
+        'USER': os.environ.get('MYSQLUSER', 'root'),
+        'PASSWORD': os.environ.get('MYSQLPASSWORD', 'Admin123'),
+        'HOST': os.environ.get('MYSQLHOST', 'localhost'),
+        'PORT': os.environ.get('MYSQLPORT', '3306'),
     },
 }
 
