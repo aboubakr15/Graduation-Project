@@ -49,7 +49,9 @@ Returns an access token and a refresh token.
 
 ### 2. Refresh Token
 
-Obtain a new access token using a valid refresh token. This should be used when the access token expires.
+Obtain a new access token and a new refresh token using a valid refresh token. This should be used when the access token expires.
+
+**Important**: With token rotation enabled, the refresh endpoint returns BOTH a new access token AND a new refresh token. The frontend MUST update the stored refresh token with the new one from the response.
 
 - **Endpoint**: `/api/token/refresh/`
 - **Method**: `POST`
@@ -59,7 +61,7 @@ Obtain a new access token using a valid refresh token. This should be used when 
 
 | Field     | Type   | Required | Description |
 |-----------|--------|----------|-------------|
-| `refresh` | string | Yes      | The valid refresh token obtained during login |
+| `refresh` | string | Yes      | The valid refresh token (from login or previous refresh) |
 
 **Example:**
 ```json
@@ -70,11 +72,12 @@ Obtain a new access token using a valid refresh token. This should be used when 
 
 #### Response (200 OK)
 
-Returns a new access token.
+Returns a new access token and a new refresh token. **Both tokens must be saved by the frontend**.
 
 ```json
 {
-    "access": "eyJ0eXAiOiJK..."
+    "access": "eyJ0eXAiOiJK...",
+    "refresh": "eyJ0eXAiOiJK..."
 }
 ```
 
@@ -113,5 +116,9 @@ Returns a success status (usually empty body or success detail).
     `Authorization: Bearer <access_token>`
 2.  **Token Expiry**:
     -   Access Token: 60 minutes
-    -   Refresh Token: 1 day
-3.  **Token Rotation**: Refresh tokens are *not* rotated (checking settings `ROTATE_REFRESH_TOKENS = False`).
+    -   Refresh Token: 1 day (renewed with each refresh call)
+3.  **Token Rotation**: Refresh tokens **are rotated**. Each time you call the refresh endpoint:
+    -   You receive a NEW access token AND a NEW refresh token
+    -   The old refresh token is automatically blacklisted
+    -   **You MUST save the new refresh token** - if you don't, you'll have to login again after 1 day
+    -   This allows active users to stay logged in indefinitely as long as they refresh their tokens regularly
