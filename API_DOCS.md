@@ -13,7 +13,7 @@ The project uses **JSON Web Tokens (JWT)** for authentication.
 
 ### 1. Login (Obtain Token Pair)
 
-Authenticate a user and obtain an access and refresh token.
+Authenticate a user using their email and password to obtain an access and refresh token.
 
 - **Endpoint**: `/api/token/`
 - **Method**: `POST`
@@ -23,13 +23,13 @@ Authenticate a user and obtain an access and refresh token.
 
 | Field      | Type   | Required | Description |
 |------------|--------|----------|-------------|
-| `username` | string | Yes      | User's username |
+| `email` | string | Yes      | User's email address |
 | `password` | string | Yes      | User's password |
 
 **Example:**
 ```json
 {
-    "username": "teststudent",
+    "email": "student@example.com",
     "password": "TestPassword123"
 }
 ```
