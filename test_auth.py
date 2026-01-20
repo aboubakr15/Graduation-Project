@@ -1,15 +1,16 @@
 import requests
 
-BASE_URL = 'http://127.0.0.1:8000'
+BASE_URL = 'https://graduation-project-production-be44.up.railway.app'
 
 def test_login():
     url = f'{BASE_URL}/api/token/'
     data = {
         'username': 'teststudent',
+        'email': 'test',
         'password': 'TestPassword123'
     }
     
-    print(f"Attempting login to {url} with {data['username']}...")
+    print(f"Attempting login to {url} with {data['email']}...")
     try:
         response = requests.post(url, data=data)
         
