@@ -17,7 +17,8 @@ DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = [
     'graduation-project-production-be44.up.railway.app',
-    '127.0.0.1:8000',
+    '127.0.0.1',
+    'localhost',
     ]
 CSRF_TRUSTED_ORIGINS = [
     'https://graduation-project-production-be44.up.railway.app',

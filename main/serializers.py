@@ -9,7 +9,12 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Custom token serializer that uses email instead of username for authentication."""
     
     email = serializers.EmailField(required=True)
-    username = None  # Remove the username field
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Remove the username field (which might be added by parent __init__)
+        if 'username' in self.fields:
+            self.fields.pop('username')
     
     def validate(self, attrs):
         # Get the email from attrs
