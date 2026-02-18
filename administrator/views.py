@@ -1,75 +1,99 @@
-from rest_framework import viewsets, status, generics
+from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.filters import SearchFilter, OrderingFilter
+from rest_framework.filters import SearchFilter
 
 from .permissions import IsAdminOnly
 from .serializers import (
-    AdminDashboardSummarySerializer, CourseSerializer, UserSerializer,
-    AnnouncementSerializer, CourseMaterialSerializer, 
-    ChatConversationSerializer, ChatMessageSerializer, NotificationSerializer
+    AdminDashboardSummarySerializer,
+    CourseSerializer,
+    UserSerializer,
+    AnnouncementSerializer,
+    CourseMaterialSerializer,
+    ChatConversationSerializer,
+    ChatMessageSerializer,
+    NotificationSerializer,
 )
 from .services import (
-    AdminDashboardService, AdminCourseService, AdminUserService,
-    AdminAnnouncementService, AdminMaterialService, AdminChatService, AdminNotificationService
+    AdminDashboardService,
+    AdminCourseService,
+    AdminUserService,
+    AdminAnnouncementService,
+    AdminMaterialService,
+    AdminChatService,
+    AdminNotificationService,
 )
 from main.models import User
+
 
 class DashboardViewSet(viewsets.ViewSet):
     permission_classes = [IsAdminOnly]
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=["get"])
     def summary(self, request):
         stats = AdminDashboardService.get_summary_stats()
         serializer = AdminDashboardSummarySerializer(stats)
         return Response(serializer.data)
 
+
 class CourseViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminOnly]
     serializer_class = CourseSerializer
     filter_backends = [SearchFilter, DjangoFilterBackend]
-    search_fields = ['name', 'code']
-    filterset_fields = ['department']
+    search_fields = ["name", "code"]
+    filterset_fields = ["department"]
 
     def get_queryset(self):
         return AdminCourseService.get_courses_queryset()
 
     def perform_create(self, serializer):
-        AdminCourseService.create_course(serializer.validated_data)
+        course = AdminCourseService.create_course(serializer.validated_data)
+        serializer.instance = course
 
     def perform_update(self, serializer):
-        AdminCourseService.update_course(serializer.instance, serializer.validated_data)
+        course = AdminCourseService.update_course(
+            serializer.instance, serializer.validated_data
+        )
+        serializer.instance = course
 
     def perform_destroy(self, instance):
         AdminCourseService.delete_course(instance)
+
 
 class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminOnly]
     serializer_class = UserSerializer
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['primary_role']
+    filterset_fields = ["primary_role"]
 
     def get_queryset(self):
-        role = self.request.query_params.get('role')
+        role = self.request.query_params.get("role")
         if role:
             return AdminUserService.get_users_by_role(role)
-        return User.objects.all().select_related('department')
+        return User.objects.all().select_related("department")
 
-    @action(detail=False, methods=['post'], url_path='instructors')
+    def perform_update(self, serializer):
+        user = AdminUserService.update_user(serializer.instance, serializer.validated_data)
+        serializer.instance = user
+
+    def perform_destroy(self, instance):
+        AdminUserService.delete_user(instance)
+
+    @action(detail=False, methods=["post"], url_path="instructors")
     def create_instructor(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = AdminUserService.create_user(serializer.validated_data, User.Role.PROFESSOR)
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
 
-    @action(detail=False, methods=['post'], url_path='tas')
+    @action(detail=False, methods=["post"], url_path="tas")
     def create_ta(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = AdminUserService.create_user(serializer.validated_data, User.Role.TA)
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+
 
 class AnnouncementViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminOnly]
@@ -79,7 +103,20 @@ class AnnouncementViewSet(viewsets.ModelViewSet):
         return AdminAnnouncementService.get_announcements()
 
     def perform_create(self, serializer):
-        AdminAnnouncementService.create_announcement(self.request.user, serializer.validated_data)
+        announcement = AdminAnnouncementService.create_announcement(
+            self.request.user, serializer.validated_data
+        )
+        serializer.instance = announcement
+
+    def perform_update(self, serializer):
+        announcement = AdminAnnouncementService.update_announcement(
+            serializer.instance, serializer.validated_data
+        )
+        serializer.instance = announcement
+
+    def perform_destroy(self, instance):
+        AdminAnnouncementService.delete_announcement(instance)
+
 
 class MaterialViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminOnly]
@@ -87,13 +124,31 @@ class MaterialViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return AdminMaterialService.get_materials()
-    
-    @action(detail=False, methods=['post'])
+
+    def perform_create(self, serializer):
+        material = AdminMaterialService.upload_material(
+            self.request.user, serializer.validated_data
+        )
+        serializer.instance = material
+
+    def perform_update(self, serializer):
+        material = AdminMaterialService.update_material(
+            serializer.instance, serializer.validated_data
+        )
+        serializer.instance = material
+
+    def perform_destroy(self, instance):
+        AdminMaterialService.delete_material(instance)
+
+    @action(detail=False, methods=["post"])
     def upload(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        material = AdminMaterialService.upload_material(request.user, serializer.validated_data)
+        material = AdminMaterialService.upload_material(
+            request.user, serializer.validated_data
+        )
         return Response(CourseMaterialSerializer(material).data, status=status.HTTP_201_CREATED)
+
 
 class ChatViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAdminOnly]
@@ -101,20 +156,24 @@ class ChatViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return AdminChatService.get_conversations()
-    
-    @action(detail=False, methods=['get'])
+
+    @action(detail=False, methods=["get"])
     def messages(self, request):
-        conversation_id = request.query_params.get('conversation_id')
+        conversation_id = request.query_params.get("conversation_id")
         if not conversation_id:
-            return Response({"error": "conversation_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "conversation_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         messages = AdminChatService.get_messages(conversation_id)
         serializer = ChatMessageSerializer(messages, many=True)
         return Response(serializer.data)
 
+
 class NotificationViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminOnly]
     serializer_class = NotificationSerializer
-    http_method_names = ['get', 'patch'] # Only GET and PATCH as per requirements
+    http_method_names = ["get", "patch"]
 
     def get_queryset(self):
         return AdminNotificationService.get_notifications(self.request.user)
