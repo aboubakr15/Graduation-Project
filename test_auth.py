@@ -5,8 +5,8 @@ BASE_URL = 'https://graduation-project-production-be44.up.railway.app'
 def test_login():
     url = f'{BASE_URL}/api/token/'
     data = {
-        'email': 'test@test.com',
-        'password': 'TestPassword123'
+        'email': 'qassem@qassem.qassem',
+        'password': 'ahmedashraf15'
     }
     
     print(f"Attempting login to {url} with {data['email']}...")
