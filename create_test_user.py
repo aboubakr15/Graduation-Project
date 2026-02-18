@@ -7,11 +7,11 @@ django.setup()
 from main.models import User
 
 def create_user():
-    username = 'teststudent'
-    email = 'test@test.com'
+    username = 'testadmin'
+    email = 'admin@admin.com'
     password = 'TestPassword123'
     if not User.objects.filter(username=username).exists():
-        user = User.objects.create_user(username=username, email=email, password=password, primary_role=User.Role.STUDENT, full_name='Test Student')
+        user = User.objects.create_user(username=username, email=email, password=password, primary_role=User.Role.ADMIN, full_name='Test Admin')
         print(f"User '{username}' with email '{email}' created.")
     else:
         print(f"User '{username}' already exists. Updating credentials.")
