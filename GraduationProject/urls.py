@@ -13,6 +13,9 @@ urlpatterns = [
     # Custom Admin API
     path('admin/', include('administrator.urls')),
 
+    # Student API
+    path('api/student/', include('student.urls')),
+
     path('api/token/', EmailTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/token/blacklist/', TokenBlacklistView.as_view(), name='token_blacklist'),
