@@ -10,6 +10,16 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
     
     email = serializers.EmailField(required=True)
     
+    @classmethod
+    def get_token(cls, user):
+        """
+        Customize the JWT payload to include the user's primary role.
+        This will be present in both access and refresh tokens.
+        """
+        token = super().get_token(user)
+        token['role'] = user.primary_role
+        return token
+    
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Remove the username field (which might be added by parent __init__)
