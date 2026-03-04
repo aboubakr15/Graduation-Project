@@ -178,6 +178,105 @@ All Admin API endpoints are prefixed with `/admin/`.
 - **Endpoint**: `/admin/courses/{id}/`
 - **Method**: `PATCH` / `DELETE`
 
+### 2.1 Course Offerings
+
+#### List Course Offerings
+- **Endpoint**: `/admin/course-offerings/`
+- **Method**: `GET`
+- **Query Params**: `?search=course_name_or_code`, `?semester=Fall`, `?year=2024`, `?is_active=true`
+- **Response**: List of course offerings.
+
+#### Create Course Offering
+- **Endpoint**: `/admin/course-offerings/`
+- **Method**: `POST`
+- **Body**:
+  ```json
+  {
+      "course": 1,
+      "semester": "Fall",
+      "year": 2024,
+      "instructor": 5,
+      "tas": [2, 3],
+      "capacity": 30,
+      "course_schedule": [{"day": "Monday", "time": "10:00-11:30"}],
+      "is_active": true
+  }
+  ```
+
+#### Update Course Offering
+- **Endpoint**: `/admin/course-offerings/{id}/`
+- **Method**: `PATCH`
+
+#### Delete Course Offering
+- **Endpoint**: `/admin/course-offerings/{id}/`
+- **Method**: `DELETE`
+
+### 2.2 Enrollments
+
+#### List Enrollments
+- **Endpoint**: `/admin/enrollments/`
+- **Method**: `GET`
+- **Query Params**: `?status=ACTIVE`, `?course_offering=1`, `?student=1`
+
+#### Create Enrollment
+- **Endpoint**: `/admin/enrollments/`
+- **Method**: `POST`
+- **Body**:
+  ```json
+  {
+      "student": 10,
+      "course_offering": 1,
+      "status": "ACTIVE",
+      "grade": null
+  }
+  ```
+
+#### Update Enrollment
+- **Endpoint**: `/admin/enrollments/{id}/`
+- **Method**: `PATCH`
+- **Body**:
+  ```json
+  {
+      "status": "COMPLETED",
+      "grade": 95.50
+  }
+  ```
+
+#### Delete Enrollment
+- **Endpoint**: `/admin/enrollments/{id}/`
+- **Method**: `DELETE`
+
+### 2.3 Department Management
+
+#### List Departments
+- **Endpoint**: `/admin/departments/`
+- **Method**: `GET`
+- **Query Params**: `?search=name_or_code`
+- **Response**: List of departments.
+
+#### Create Department
+- **Endpoint**: `/admin/departments/`
+- **Method**: `POST`
+- **Body**:
+  ```json
+  {
+      "name": "Computer Science",
+      "name_ar": "علوم الحاسب",
+      "code": "CS",
+      "head_of_department": 5
+  }
+  ```
+  **Note**: `head_of_department` is optional and must be a professor.
+
+#### Update Department
+- **Endpoint**: `/admin/departments/{id}/`
+- **Method**: `PATCH`
+- **Body**: Same as create.
+
+#### Delete Department
+- **Endpoint**: `/admin/departments/{id}/`
+- **Method**: `DELETE`
+
 ### 3. User Management
 
 #### List Users

@@ -188,3 +188,115 @@ class AdminNotificationService:
     @staticmethod
     def get_notifications(user):
         return Notification.objects.all().select_related("user")
+
+
+class AdminDepartmentService:
+    @staticmethod
+    def get_departments_queryset():
+        return Department.objects.select_related("head_of_department").all()
+
+    @staticmethod
+    def create_department(data):
+        return Department.objects.create(**data)
+
+    @staticmethod
+    def update_department(department, data):
+        for key, value in data.items():
+            setattr(department, key, value)
+        department.save()
+        return department
+
+    @staticmethod
+    def delete_department(department):
+        department.delete()
+
+
+class AdminCourseOfferingService:
+    @staticmethod
+    def get_course_offerings_queryset():
+        return CourseOffering.objects.select_related(
+            "course", "instructor"
+        ).prefetch_related("tas").all()
+
+    @staticmethod
+    def get_course_offering_by_id(offering_id):
+        return CourseOffering.objects.select_related(
+            "course", "instructor"
+        ).prefetch_related("tas").get(pk=offering_id)
+
+    @staticmethod
+    def create_course_offering(data):
+        tas = data.pop("tas", [])
+        course_offering = CourseOffering.objects.create(**data)
+        if tas:
+            course_offering.tas.set(tas)
+        return course_offering
+
+    @staticmethod
+    def update_course_offering(course_offering, data):
+        tas = data.pop("tas", None)
+        for key, value in data.items():
+            setattr(course_offering, key, value)
+        course_offering.save()
+        if tas is not None:
+            course_offering.tas.set(tas)
+        return course_offering
+
+    @staticmethod
+    def delete_course_offering(course_offering):
+        course_offering.delete()
+
+
+class AdminEnrollmentService:
+    @staticmethod
+    def get_enrollments_queryset():
+        return Enrollment.objects.select_related(
+            "student", "course_offering", "course_offering__course"
+        ).all()
+
+    @staticmethod
+    def get_enrollments_by_offering(course_offering_id):
+        return Enrollment.objects.filter(
+            course_offering_id=course_offering_id
+        ).select_related("student", "course_offering__course")
+
+    @staticmethod
+    def get_enrollments_by_student(student_id):
+        return Enrollment.objects.filter(
+            student_id=student_id
+        ).select_related("course_offering__course")
+
+    @staticmethod
+    def create_enrollment(data):
+        enrollment = Enrollment.objects.create(**data)
+        if enrollment.status == Enrollment.Status.ACTIVE:
+            enrollment.course_offering.enrollment_count += 1
+            enrollment.course_offering.save()
+        return enrollment
+
+    @staticmethod
+    def update_enrollment(enrollment, data):
+        old_status = enrollment.status
+        for key, value in data.items():
+            setattr(enrollment, key, value)
+        enrollment.save()
+        
+        new_status = enrollment.status
+        offering = enrollment.course_offering
+        
+        if old_status == Enrollment.Status.ACTIVE and new_status != Enrollment.Status.ACTIVE:
+            offering.enrollment_count = max(0, offering.enrollment_count - 1)
+            offering.save()
+        elif old_status != Enrollment.Status.ACTIVE and new_status == Enrollment.Status.ACTIVE:
+            offering.enrollment_count += 1
+            offering.save()
+        
+        return enrollment
+
+    @staticmethod
+    def delete_enrollment(enrollment):
+        offering = enrollment.course_offering
+        if enrollment.status == Enrollment.Status.ACTIVE:
+            offering.enrollment_count = max(0, offering.enrollment_count - 1)
+            offering.save()
+        enrollment.delete()

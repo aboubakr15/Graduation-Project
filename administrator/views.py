@@ -14,6 +14,11 @@ from .serializers import (
     ChatConversationSerializer,
     ChatMessageSerializer,
     NotificationSerializer,
+    DepartmentSerializer,
+    CourseOfferingSerializer,
+    CourseOfferingCreateUpdateSerializer,
+    EnrollmentSerializer,
+    EnrollmentCreateUpdateSerializer,
 )
 from .services import (
     AdminDashboardService,
@@ -23,6 +28,9 @@ from .services import (
     AdminMaterialService,
     AdminChatService,
     AdminNotificationService,
+    AdminDepartmentService,
+    AdminCourseOfferingService,
+    AdminEnrollmentService,
 )
 from main.models import User
 
@@ -177,3 +185,90 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return AdminNotificationService.get_notifications(self.request.user)
+
+
+class DepartmentViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOnly]
+    serializer_class = DepartmentSerializer
+    filter_backends = [SearchFilter]
+    search_fields = ["name", "code"]
+
+    def get_queryset(self):
+        return AdminDepartmentService.get_departments_queryset()
+
+    def perform_create(self, serializer):
+        department = AdminDepartmentService.create_department(serializer.validated_data)
+        serializer.instance = department
+
+    def perform_update(self, serializer):
+        department = AdminDepartmentService.update_department(
+            serializer.instance, serializer.validated_data
+        )
+        serializer.instance = department
+
+    def perform_destroy(self, instance):
+        AdminDepartmentService.delete_department(instance)
+
+
+class CourseOfferingViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOnly]
+    serializer_class = CourseOfferingSerializer
+    filter_backends = [SearchFilter, DjangoFilterBackend]
+    search_fields = ["course__name", "course__code"]
+    filterset_fields = ["semester", "year", "is_active"]
+
+    def get_serializer_class(self):
+        if self.action in ["create", "update", "partial_update"]:
+            return CourseOfferingCreateUpdateSerializer
+        return CourseOfferingSerializer
+
+    def get_queryset(self):
+        return AdminCourseOfferingService.get_course_offerings_queryset()
+
+    def perform_create(self, serializer):
+        offering = AdminCourseOfferingService.create_course_offering(serializer.validated_data)
+        serializer.instance = offering
+
+    def perform_update(self, serializer):
+        offering = AdminCourseOfferingService.update_course_offering(
+            serializer.instance, serializer.validated_data
+        )
+        serializer.instance = offering
+
+    def perform_destroy(self, instance):
+        AdminCourseOfferingService.delete_course_offering(instance)
+
+
+class EnrollmentViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAdminOnly]
+    serializer_class = EnrollmentSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["status", "course_offering", "student"]
+
+    def get_serializer_class(self):
+        if self.action in ["create", "update", "partial_update"]:
+            return EnrollmentCreateUpdateSerializer
+        return EnrollmentSerializer
+
+    def get_queryset(self):
+        course_offering_id = self.request.query_params.get("course_offering")
+        student_id = self.request.query_params.get("student")
+        
+        if course_offering_id:
+            return AdminEnrollmentService.get_enrollments_by_offering(course_offering_id)
+        elif student_id:
+            return AdminEnrollmentService.get_enrollments_by_student(student_id)
+        return AdminEnrollmentService.get_enrollments_queryset()
+
+    def perform_create(self, serializer):
+        enrollment = AdminEnrollmentService.create_enrollment(serializer.validated_data)
+        serializer.instance = enrollment
+
+    def perform_update(self, serializer):
+        enrollment = AdminEnrollmentService.update_enrollment(
+            serializer.instance, serializer.validated_data
+        )
+        serializer.instance = enrollment
+
+    def perform_destroy(self, instance):
+        AdminEnrollmentService.delete_enrollment(instance)
