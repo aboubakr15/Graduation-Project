@@ -1,5 +1,5 @@
 from rest_framework.views import APIView
-from rest_framework.generics import ListAPIView, RetrieveAPIView, ListCreateAPIView
+from rest_framework.generics import ListAPIView, RetrieveAPIView, ListCreateAPIView, RetrieveUpdateAPIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
@@ -10,10 +10,15 @@ from .serializers import (
     CourseListSerializer, 
     CourseDetailSerializer, 
     ToDoItemSerializer, 
-    ChatMessageSerializer
+    ChatMessageSerializer,
+    EnrollmentSerializer,
+    StudentSubmissionSerializer,
+    GradeSerializer,
+    NotificationSerializer
 )
 from main.models import (
-    User, CourseOffering, Enrollment, TodoItem, ChatConversation, ChatMessage
+    User, CourseOffering, Enrollment, TodoItem, ChatConversation, ChatMessage,
+    StudentSubmission, Notification, Assignment, Announcement
 )
 
 class StudentDashboardView(APIView):
@@ -24,24 +29,70 @@ class StudentDashboardView(APIView):
         if user.primary_role != User.Role.STUDENT:
             return Response({"error": "User is not a student"}, status=status.HTTP_403_FORBIDDEN)
         
-        # DashboardSerializer expects a user instance as the source
-        serializer = DashboardSerializer(user, context={'request': request})
-        # We need to restructure the response to match the fields in DashboardSerializer 
-        # because DashboardSerializer is a Serializer, not ModelSerializer, 
-        # but it uses 'source="*"' on profile, which might be tricky.
-        # Let's simplify: pass the user object to the serializer.
-        
-        return Response(serializer.data)
+        data = {
+            'profile': StudentProfileSerializer(user, context={'request': request}).data,
+            'portal_announcements': self._get_portal_announcements(),
+            'course_announcements': self._get_course_announcements(user),
+            'courses_progress': self._get_courses_progress(user),
+            'completed_courses_count': Enrollment.objects.filter(student=user, status=Enrollment.Status.COMPLETED).count(),
+            'in_progress_courses_count': Enrollment.objects.filter(student=user, status=Enrollment.Status.ACTIVE).count(),
+        }
+        return Response(data)
 
-class StudentCourseListView(ListAPIView):
-    serializer_class = CourseListSerializer
+    def _get_portal_announcements(self):
+        from .serializers import AnnouncementSerializer
+        anns = Announcement.objects.filter(is_global=True).order_by('-created_at')[:3]
+        return AnnouncementSerializer(anns, many=True).data
+
+    def _get_course_announcements(self, user):
+        from .serializers import AnnouncementSerializer
+        enrolled_course_ids = Enrollment.objects.filter(
+            student=user, status=Enrollment.Status.ACTIVE
+        ).values_list('course_offering_id', flat=True)
+        anns = Announcement.objects.filter(
+            course_offering_id__in=enrolled_course_ids
+        ).order_by('-created_at')[:3]
+        return AnnouncementSerializer(anns, many=True).data
+
+    def _get_courses_progress(self, user):
+        from .serializers import CourseProgressSerializer
+        enrollments = Enrollment.objects.filter(student=user, status=Enrollment.Status.ACTIVE)
+        course_offerings = [e.course_offering for e in enrollments]
+        return CourseProgressSerializer(course_offerings, many=True).data
+
+class StudentCourseListView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get_queryset(self):
-        return Enrollment.objects.filter(
-            student=self.request.user, 
+    def get(self, request):
+        enrollments = Enrollment.objects.filter(
+            student=request.user, 
             status=Enrollment.Status.ACTIVE
         )
+        serializer = CourseListSerializer(enrollments, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        course_offering_id = request.data.get('course_offering_id')
+        if not course_offering_id:
+            return Response({"error": "course_offering_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        course_offering = get_object_or_404(CourseOffering, pk=course_offering_id, is_active=True)
+        
+        if Enrollment.objects.filter(student=request.user, course_offering=course_offering).exists():
+            return Response({"error": "Already enrolled in this course"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if course_offering.enrollment_count >= course_offering.capacity:
+            return Response({"error": "Course is full"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        enrollment = Enrollment.objects.create(
+            student=request.user,
+            course_offering=course_offering,
+            status=Enrollment.Status.ACTIVE
+        )
+        course_offering.enrollment_count += 1
+        course_offering.save()
+        
+        return Response(EnrollmentSerializer(enrollment).data, status=status.HTTP_201_CREATED)
 
 class StudentCourseDetailView(RetrieveAPIView):
     serializer_class = CourseDetailSerializer
@@ -67,12 +118,19 @@ class StudentToDoListView(ListCreateAPIView):
     def perform_create(self, serializer):
         serializer.save(student=self.request.user)
 
-class StudentProfileView(RetrieveAPIView):
-    serializer_class = StudentProfileSerializer
+class StudentProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get_object(self):
-        return self.request.user
+    def get(self, request):
+        serializer = StudentProfileSerializer(request.user)
+        return Response(serializer.data)
+
+    def patch(self, request):
+        serializer = StudentProfileSerializer(request.user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class StudentChatBotView(APIView):
     permission_classes = [IsAuthenticated]
@@ -133,3 +191,79 @@ class StudentChatBotView(APIView):
             "user_message": ChatMessageSerializer(user_msg).data,
             "ai_message": ChatMessageSerializer(ai_msg).data
         })
+
+class StudentEnrollmentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        status_filter = request.query_params.get('status')
+        queryset = Enrollment.objects.filter(student=request.user)
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        serializer = EnrollmentSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def delete(self, request, pk):
+        enrollment = get_object_or_404(Enrollment, pk=pk, student=request.user)
+        course_offering = enrollment.course_offering
+        enrollment.status = Enrollment.Status.DROPPED
+        enrollment.save()
+        course_offering.enrollment_count = max(0, course_offering.enrollment_count - 1)
+        course_offering.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+class StudentSubmissionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        submissions = StudentSubmission.objects.filter(student=request.user).order_by('-submission_date')
+        serializer = StudentSubmissionSerializer(submissions, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        assignment_id = request.data.get('assignment_id')
+        file_url = request.data.get('file_url')
+        
+        if not assignment_id:
+            return Response({"error": "assignment_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        assignment = get_object_or_404(Assignment, pk=assignment_id)
+        
+        if not Enrollment.objects.filter(student=request.user, course_offering=assignment.course_offering, status=Enrollment.Status.ACTIVE).exists():
+            return Response({"error": "Not enrolled in this course"}, status=status.HTTP_403_FORBIDDEN)
+        
+        submission, created = StudentSubmission.objects.update_or_create(
+            student=request.user,
+            assignment=assignment,
+            defaults={
+                'file_url': file_url,
+                'status': StudentSubmission.Status.SUBMITTED
+            }
+        )
+        return Response(StudentSubmissionSerializer(submission).data, status=status.HTTP_201_CREATED)
+
+class StudentGradesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        enrollments = Enrollment.objects.filter(
+            student=request.user,
+            status__in=[Enrollment.Status.COMPLETED, Enrollment.Status.ACTIVE],
+            grade__isnull=False
+        ).order_by('-enrollment_date')
+        serializer = GradeSerializer(enrollments, many=True)
+        return Response(serializer.data)
+
+class StudentNotificationsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        notifications = Notification.objects.filter(user=request.user).order_by('-created_at')[:50]
+        serializer = NotificationSerializer(notifications, many=True)
+        return Response(serializer.data)
+
+    def patch(self, request, pk):
+        notification = get_object_or_404(Notification, pk=pk, user=request.user)
+        notification.is_read = request.data.get('is_read', notification.is_read)
+        notification.save()
+        return Response(NotificationSerializer(notification).data)

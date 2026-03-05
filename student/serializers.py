@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from main.models import (
     User, Announcement, CourseOffering, Enrollment, 
-    Assignment, TodoItem, ChatMessage, CourseMaterial
+    Assignment, TodoItem, ChatMessage, CourseMaterial, StudentSubmission, Notification
 )
 from django.db.models import Sum
 
@@ -161,3 +161,34 @@ class ChatMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatMessage
         fields = ['id', 'role', 'content', 'timestamp']
+
+class EnrollmentSerializer(serializers.ModelSerializer):
+    course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
+    course_code = serializers.CharField(source='course_offering.course.code', read_only=True)
+    semester = serializers.CharField(source='course_offering.semester', read_only=True)
+    year = serializers.IntegerField(source='course_offering.year', read_only=True)
+
+    class Meta:
+        model = Enrollment
+        fields = ['id', 'course_offering', 'course_name', 'course_code', 'semester', 'year', 'status', 'grade', 'enrollment_date']
+
+class StudentSubmissionSerializer(serializers.ModelSerializer):
+    assignment_title = serializers.CharField(source='assignment.title', read_only=True)
+    course_name = serializers.CharField(source='assignment.course_offering.course.name', read_only=True)
+
+    class Meta:
+        model = StudentSubmission
+        fields = ['id', 'assignment', 'assignment_title', 'course_name', 'submission_date', 'file_url', 'status', 'notes']
+
+class GradeSerializer(serializers.ModelSerializer):
+    course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
+    course_code = serializers.CharField(source='course_offering.course.code', read_only=True)
+
+    class Meta:
+        model = Enrollment
+        fields = ['id', 'course_name', 'course_code', 'grade', 'status']
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ['id', 'title', 'message', 'notification_type', 'related_object_type', 'related_object_id', 'is_read', 'created_at']
