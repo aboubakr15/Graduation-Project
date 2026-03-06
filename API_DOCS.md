@@ -13,6 +13,8 @@ This document outlines all API endpoints for the Graduation Project.
 2. [Authentication](#authentication)
 3. [Admin API](#admin-api)
 4. [Student API](#student-api)
+5. [Professor API](#professor-api)
+6. [Teaching Assistant API](#teaching-assistant-api)
 
 ---
 
@@ -1178,17 +1180,807 @@ Returns up to 50 recent notifications.
 
 ---
 
-## Status Codes Summary
+# Professor API
 
-| Code | Description |
-|------|-------------|
-| 200 | OK - Request succeeded |
-| 201 | Created - Resource created successfully |
-| 204 | No Content - Request succeeded with no content to return |
-| 400 | Bad Request - Invalid input |
-| 401 | Unauthorized - Invalid or missing token |
-| 403 | Forbidden - Permission denied |
-| 404 | Not Found - Resource not found |
+> **Base URL**: `/api/professor/`  
+> **Permission Required**: `primary_role="PROFESSOR"`  
+> **Authorization Header**: `Bearer <access_token>`
+
+> **Note**: Professor API uses the shared **Instructor endpoints** listed below. Both `/api/professor/` and `/api/ta/` route to the same endpoint implementations.
+
+All Professor endpoints are identical to the Instructor API endpoints. See [Instructor API](#instructor-api) for detailed documentation.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/professor/dashboard/` | Dashboard summary |
+| GET/POST | `/api/professor/courses/` | List/Create course offerings |
+| GET/PATCH/DELETE | `/api/professor/courses/{id}/` | Course details |
+| GET/POST | `/api/professor/materials/` | List/Upload materials |
+| PATCH/DELETE | `/api/professor/materials/{id}/` | Manage material |
+| GET/POST | `/api/professor/assignments/` | List/Create assignments |
+| GET/PATCH/DELETE | `/api/professor/assignments/{id}/` | Manage assignment |
+| GET | `/api/professor/submissions/` | List submissions |
+| POST | `/api/professor/submissions/{id}/grade/` | Grade submission |
+| GET | `/api/professor/students/` | List students |
+| GET/POST | `/api/professor/announcements/` | List/Create announcements |
+| PATCH/DELETE | `/api/professor/announcements/{id}/` | Manage announcement |
+| GET | `/api/professor/chat/` | List conversations |
+| GET | `/api/professor/chat/messages/` | Get messages |
+| GET/PATCH | `/api/professor/notifications/` | List/Mark notifications |
+
+---
+
+# Teaching Assistant API
+
+> **Base URL**: `/api/ta/`  
+> **Permission Required**: `primary_role="TA"`  
+> **Authorization Header**: `Bearer <access_token>`
+
+> **Note**: TA API uses the shared **Instructor endpoints** listed below. Both `/api/professor/` and `/api/ta/` route to the same endpoint implementations.
+
+All TA endpoints are identical to the Instructor API endpoints. See [Instructor API](#instructor-api) for detailed documentation.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/ta/dashboard/` | Dashboard summary |
+| GET/POST | `/api/ta/courses/` | List/Create course offerings |
+| GET/PATCH/DELETE | `/api/ta/courses/{id}/` | Course details |
+| GET/POST | `/api/ta/materials/` | List/Upload materials |
+| PATCH/DELETE | `/api/ta/materials/{id}/` | Manage material |
+| GET/POST | `/api/ta/assignments/` | List/Create assignments |
+| GET/PATCH/DELETE | `/api/ta/assignments/{id}/` | Manage assignment |
+| GET | `/api/ta/submissions/` | List submissions |
+| POST | `/api/ta/submissions/{id}/grade/` | Grade submission |
+| GET | `/api/ta/students/` | List students |
+| GET/POST | `/api/ta/announcements/` | List/Create announcements |
+| PATCH/DELETE | `/api/ta/announcements/{id}/` | Manage announcement |
+| GET | `/api/ta/chat/` | List conversations |
+| GET | `/api/ta/chat/messages/` | Get messages |
+| GET/PATCH | `/api/ta/notifications/` | List/Mark notifications |
+
+---
+
+# Instructor API
+
+> **Base URL**: `/api/instructor/`  
+> **Permission Required**: `primary_role="PROFESSOR"` or `primary_role="TA"`  
+> **Authorization Header**: `Bearer <access_token>`
+
+> **Note**: Both Professor and TA use the same endpoints. The Instructor app contains all shared endpoints. Professor-specific or TA-specific endpoints can be added to their respective apps later.
+
+---
+
+## 1. Quick Reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/instructor/dashboard/` | Dashboard summary |
+| GET/POST | `/api/instructor/courses/` | List/Create course offerings |
+| GET/PATCH/DELETE | `/api/instructor/courses/{id}/` | Course details |
+| GET/POST | `/api/instructor/materials/` | List/Upload materials |
+| PATCH/DELETE | `/api/instructor/materials/{id}/` | Manage material |
+| GET/POST | `/api/instructor/assignments/` | List/Create assignments |
+| GET/PATCH/DELETE | `/api/instructor/assignments/{id}/` | Manage assignment |
+| GET | `/api/instructor/submissions/` | List submissions |
+| POST | `/api/instructor/submissions/{id}/grade/` | Grade submission |
+| GET | `/api/instructor/students/` | List students |
+| GET/POST | `/api/instructor/announcements/` | List/Create announcements |
+| PATCH/DELETE | `/api/instructor/announcements/{id}/` | Manage announcement |
+| GET | `/api/instructor/chat/` | List conversations |
+| GET | `/api/instructor/chat/messages/` | Get messages |
+| GET/PATCH | `/api/instructor/notifications/` | List/Mark notifications |
+
+---
+
+## 2. Dashboard
+
+### Get Dashboard Data
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/dashboard/` |
+| **Method** | `GET` |
+
+#### Response
+
+```json
+{
+    "total_courses": 3,
+    "total_students": 120,
+    "pending_submissions": 15,
+    "upcoming_assignments": 5,
+    "recent_announcements": [
+        {
+            "id": 1,
+            "title": "Exam Schedule",
+            "content": "Finals next week...",
+            "author_name": "Dr. Salwa",
+            "course_name": "Machine Learning",
+            "is_global": false,
+            "is_TODO": false,
+            "created_at": "2024-05-01T10:00:00Z"
+        }
+    ],
+    "courses": [
+        {
+            "id": 1,
+            "course_name": "Machine Learning",
+            "course_code": "CS301",
+            "semester": "Fall",
+            "year": 2024,
+            "instructor_name": "Dr. Salwa",
+            "capacity": 30,
+            "enrolled_count": 25,
+            "is_active": true
+        }
+    ]
+}
+```
+
+---
+
+## 3. Course Offerings
+
+### List Course Offerings
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/courses/` |
+| **Method** | `GET` |
+
+Returns courses taught by the professor or assisted by the TA.
+
+| Query Params | Type | Description |
+|-------------|------|-------------|
+| None | - | Returns all courses for the user |
+
+#### Response
+
+```json
+[
+    {
+        "id": 1,
+        "course_name": "Machine Learning",
+        "course_code": "CS301",
+        "semester": "Fall",
+        "year": 2024,
+        "instructor": 5,
+        "instructor_name": "Dr. Salwa",
+        "capacity": 30,
+        "enrolled_count": 25,
+        "course_schedule": [{"day": "Monday", "time": "10:00-11:30"}],
+        "is_active": true
+    }
+]
+```
+
+---
+
+### Create Course Offering
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/courses/` |
+| **Method** | `POST` |
+
+#### Request Body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `course` | int | Yes | Course ID |
+| `semester` | string | Yes | Semester (e.g., "Fall") |
+| `year` | int | Yes | Year |
+| `instructor` | int | Yes | Instructor user ID |
+| `tas` | array | No | List of TA user IDs |
+| `capacity` | int | No | Max capacity (default: 30) |
+| `course_schedule` | array | No | Schedule array |
+| `is_active` | bool | No | Is active (default: true) |
+
+```json
+{
+    "course": 1,
+    "semester": "Fall",
+    "year": 2024,
+    "instructor": 5,
+    "tas": [2, 3],
+    "capacity": 30,
+    "course_schedule": [{"day": "Monday", "time": "10:00-11:30"}],
+    "is_active": true
+}
+```
+
+---
+
+### Get Course Details
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/courses/{id}/` |
+| **Method** | `GET` |
+
+#### Response
+
+```json
+{
+    "id": 1,
+    "course_name": "Machine Learning",
+    "course_code": "CS301",
+    "semester": "Fall",
+    "year": 2024,
+    "instructor_name": "Dr. Salwa",
+    "tas": [
+        {"id": 2, "full_name": "John TA"},
+        {"id": 3, "full_name": "Jane TA"}
+    ],
+    "capacity": 30,
+    "enrolled_count": 25,
+    "course_schedule": [{"day": "Monday", "time": "10:00-11:30"}],
+    "is_active": true,
+    "materials": [
+        {
+            "id": 1,
+            "title": "Lecture 1",
+            "description": "Intro to ML",
+            "material_type": "LECTURE",
+            "file_url": "http://...",
+            "is_visible_to_students": true,
+            "upload_date": "2024-09-01T10:00:00Z"
+        }
+    ],
+    "assignments": [
+        {
+            "id": 1,
+            "title": "Assignment 1",
+            "due_date": "2024-11-23T23:59:00Z",
+            "total_points": "10.00",
+            "submission_count": 20
+        }
+    ],
+    "enrolled_students": [
+        {
+            "enrollment_id": 1,
+            "student_id": 10,
+            "student_name": "Ahmed Ali",
+            "student_email": "ahmed@example.com",
+            "status": "ACTIVE",
+            "grade": null
+        }
+    ]
+}
+```
+
+---
+
+### Update Course Offering
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/courses/{id}/` |
+| **Method** | `PATCH` |
+
+#### Request Body
+
+Same as Create. All fields optional.
+
+---
+
+### Delete Course Offering
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/courses/{id}/` |
+| **Method** | `DELETE` |
+
+Soft delete - sets `is_active` to false.
+
+---
+
+## 4. Materials
+
+### List Materials
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/materials/` |
+| **Method** | `GET` |
+
+| Query Params | Type | Description |
+|-------------|------|-------------|
+| `course_offering` | int | Filter by course offering ID |
+
+#### Response
+
+```json
+[
+    {
+        "id": 1,
+        "course_offering": 1,
+        "course_name": "Machine Learning",
+        "title": "Lecture 1",
+        "description": "Intro to ML",
+        "material_type": "LECTURE",
+        "file_url": "http://...",
+        "file_type": "pdf",
+        "uploaded_by_name": "Dr. Salwa",
+        "upload_date": "2024-09-01T10:00:00Z",
+        "is_visible_to_students": true,
+        "order_index": 0
+    }
+]
+```
+
+---
+
+### Upload Material
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/materials/` |
+| **Method** | `POST` |
+
+#### Request Body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `course_offering` | int | Yes | Course offering ID |
+| `title` | string | Yes | Material title |
+| `description` | string | No | Description |
+| `material_type` | string | Yes | Type (LECTURE, SECTION, ASSIGNMENT_DESC, OTHER) |
+| `file_url` | string | Yes | URL to the file |
+| `file_type` | string | Yes | File type (pdf, pptx, docx, mp4) |
+| `file_size` | int | No | File size in bytes |
+| `is_visible_to_students` | bool | No | Visible to students (default: true) |
+| `order_index` | int | No | Display order |
+
+```json
+{
+    "course_offering": 1,
+    "title": "Lecture 1",
+    "description": "Intro to ML",
+    "material_type": "LECTURE",
+    "file_url": "https://storage.example.com/lecture1.pdf",
+    "file_type": "pdf",
+    "file_size": 2048576,
+    "is_visible_to_students": true,
+    "order_index": 0
+}
+```
+
+---
+
+### Update Material
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/materials/{id}/` |
+| **Method** | `PATCH` |
+
+---
+
+### Delete Material
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/materials/{id}/` |
+| **Method** | `DELETE` |
+
+---
+
+## 5. Assignments
+
+### List Assignments
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/assignments/` |
+| **Method** | `GET` |
+
+| Query Params | Type | Description |
+|-------------|------|-------------|
+| `course_offering` | int | Filter by course offering ID |
+
+#### Response
+
+```json
+[
+    {
+        "id": 1,
+        "course_offering": 1,
+        "course_name": "Machine Learning",
+        "title": "Assignment 1",
+        "description": "Linear Regression",
+        "due_date": "2024-11-23T23:59:00Z",
+        "total_points": "10.00",
+        "assignment_type": "REPORT",
+        "submission_location": "ONLINE",
+        "submission_count": 20,
+        "created_at": "2024-09-01T10:00:00Z"
+    }
+]
+```
+
+---
+
+### Create Assignment
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/assignments/` |
+| **Method** | `POST` |
+
+#### Request Body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `course_offering` | int | Yes | Course offering ID |
+| `title` | string | Yes | Assignment title |
+| `description` | string | No | Description |
+| `description_material` | int | No | Related course material ID |
+| `is_auto_correctable` | bool | No | Auto-correctable quiz |
+| `questions` | array | No | Quiz questions (JSON) |
+| `due_date` | datetime | Yes | Due date |
+| `total_points` | decimal | Yes | Total points |
+| `assignment_type` | string | Yes | QUIZ, EXAM, PROJECT, REPORT |
+| `submission_location` | string | No | ONLINE, IN_UNIVERSITY |
+
+```json
+{
+    "course_offering": 1,
+    "title": "Assignment 1",
+    "description": "Linear Regression",
+    "due_date": "2024-11-23T23:59:00Z",
+    "total_points": "10.00",
+    "assignment_type": "REPORT",
+    "submission_location": "ONLINE"
+}
+```
+
+---
+
+### Get Assignment Details
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/assignments/{id}/` |
+| **Method** | `GET` |
+
+Returns assignment details including all submissions.
+
+#### Response
+
+```json
+{
+    "id": 1,
+    "course_offering": 1,
+    "course_name": "Machine Learning",
+    "title": "Assignment 1",
+    "description": "Linear Regression",
+    "due_date": "2024-11-23T23:59:00Z",
+    "total_points": "10.00",
+    "assignment_type": "REPORT",
+    "submission_location": "ONLINE",
+    "created_by": 5,
+    "created_at": "2024-09-01T10:00:00Z",
+    "submissions": [
+        {
+            "id": 1,
+            "student": 10,
+            "student_name": "Ahmed Ali",
+            "student_email": "ahmed@example.com",
+            "submission_date": "2024-11-20T10:00:00Z",
+            "file_url": "https://...",
+            "status": "SUBMITTED",
+            "grade": null,
+            "notes": ""
+        }
+    ]
+}
+```
+
+---
+
+### Update Assignment
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/assignments/{id}/` |
+| **Method** | `PATCH` |
+
+---
+
+### Delete Assignment
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/assignments/{id}/` |
+| **Method** | `DELETE` |
+
+---
+
+## 6. Submissions
+
+### List Submissions
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/submissions/` |
+| **Method** | `GET` |
+
+| Query Params | Type | Description |
+|-------------|------|-------------|
+| `assignment_id` | int | Filter by assignment ID |
+| `course_offering` | int | Filter by course offering ID |
+
+#### Response
+
+```json
+[
+    {
+        "id": 1,
+        "assignment": 1,
+        "assignment_title": "Assignment 1",
+        "course_name": "Machine Learning",
+        "student": 10,
+        "student_name": "Ahmed Ali",
+        "student_email": "ahmed@example.com",
+        "submission_date": "2024-11-20T10:00:00Z",
+        "file_url": "https://...",
+        "status": "SUBMITTED",
+        "grade": null,
+        "notes": ""
+    }
+]
+```
+
+---
+
+### Grade Submission
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/submissions/{id}/grade/` |
+| **Method** | `POST` |
+
+#### Request Body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `grade` | decimal | Yes | Grade (0-100) |
+| `notes` | string | No | Feedback notes |
+
+```json
+{
+    "grade": "95.50",
+    "notes": "Excellent work!"
+}
+```
+
+#### Response
+
+```json
+{
+    "id": 1,
+    "assignment": 1,
+    "assignment_title": "Assignment 1",
+    "course_name": "Machine Learning",
+    "student": 10,
+    "student_name": "Ahmed Ali",
+    "student_email": "ahmed@example.com",
+    "submission_date": "2024-11-20T10:00:00Z",
+    "file_url": "https://...",
+    "status": "GRADED",
+    "grade": "95.50",
+    "notes": "Excellent work!"
+}
+```
+
+---
+
+## 7. Students
+
+### List Students
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/students/` |
+| **Method** | `GET` |
+
+| Query Params | Type | Description |
+|-------------|------|-------------|
+| `course_offering` | int | Filter by course offering ID |
+
+#### Response
+
+```json
+[
+    {
+        "id": 10,
+        "email": "ahmed@example.com",
+        "full_name": "Ahmed Ali",
+        "student_id": "20220001",
+        "department": 1,
+        "current_gpa": "3.50",
+        "enrolled_courses": [
+            {
+                "enrollment_id": 1,
+                "course_id": 1,
+                "course_name": "Machine Learning",
+                "course_code": "CS301",
+                "semester": "Fall",
+                "year": 2024,
+                "grade": null
+            }
+        ]
+    }
+]
+```
+
+---
+
+## 8. Announcements
+
+### List Announcements
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/announcements/` |
+| **Method** | `GET` |
+
+| Query Params | Type | Description |
+|-------------|------|-------------|
+| `course_offering` | int | Filter by course offering ID |
+
+---
+
+### Create Announcement
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/announcements/` |
+| **Method** | `POST` |
+
+#### Request Body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `title` | string | Yes | Announcement title |
+| `content` | string | Yes | Announcement content |
+| `course_offering` | int | No | Course offering ID (null for global) |
+| `is_global` | bool | Yes | Is global announcement |
+| `is_TODO` | bool | No | Create todo items for students |
+| `expires_at` | datetime | No | Expiration date |
+
+```json
+{
+    "title": "Exam Schedule",
+    "content": "Finals will be held next week.",
+    "course_offering": 1,
+    "is_global": false,
+    "is_TODO": false,
+    "expires_at": "2024-12-01T00:00:00Z"
+}
+```
+
+---
+
+### Update Announcement
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/announcements/{id}/` |
+| **Method** | `PATCH` |
+
+---
+
+### Delete Announcement
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/announcements/{id}/` |
+| **Method** | `DELETE` |
+
+---
+
+## 9. Chat
+
+### List Conversations
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/chat/` |
+| **Method** | `GET` |
+
+Returns all chat conversations for courses taught by the instructor/TA.
+
+#### Response
+
+```json
+[
+    {
+        "id": 1,
+        "student": 10,
+        "student_name": "Ahmed Ali",
+        "course_offering": 1,
+        "course_name": "Machine Learning",
+        "title": "Help with assignment",
+        "created_at": "2024-11-01T10:00:00Z",
+        "updated_at": "2024-11-19T10:00:00Z",
+        "is_archived": false,
+        "last_message": {
+            "role": "ASSISTANT",
+            "content": "Here's the explanation...",
+            "timestamp": "2024-11-19T10:00:00Z"
+        },
+        "unread_count": 0
+    }
+]
+```
+
+---
+
+### Get Messages
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/chat/messages/` |
+| **Method** | `GET` |
+
+| Query Params | Type | Description |
+|-------------|------|-------------|
+| `conversation_id` | int | Required - Conversation ID |
+
+#### Response
+
+```json
+[
+    {
+        "id": 1,
+        "conversation": 1,
+        "role": "USER",
+        "content": "What is linear regression?",
+        "sources_used": [],
+        "was_from_rag": false,
+        "timestamp": "2024-11-19T10:00:00Z",
+        "tokens_used": 50
+    },
+    {
+        "id": 2,
+        "conversation": 1,
+        "role": "ASSISTANT",
+        "content": "Linear regression is...",
+        "sources_used": [1, 2],
+        "was_from_rag": true,
+        "timestamp": "2024-11-19T10:00:05Z",
+        "tokens_used": 150
+    }
+]
+```
+
+---
+
+## 10. Notifications
+
+### Get Notifications
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/notifications/` |
+| **Method** | `GET` |
+
+---
+
+### Mark Notification as Read
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/notifications/{id}/` |
+| **Method** | `PATCH` |
+
+#### Request Body
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `is_read` | boolean | Mark as read (true/false) |
 
 ---
 
