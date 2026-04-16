@@ -1,7 +1,7 @@
 # API Documentation
 
-> **Version**: 1.0  
-> **Last Updated**: March 2026
+> **Version**: 1.1  
+> **Last Updated**: April 2026
 
 This document outlines all API endpoints for the Graduation Project.
 
@@ -566,7 +566,7 @@ Same as instructor.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `title` | string | Yes | Material title |
-| `file_url` | string | Yes | URL to the file |
+| `file_content` | string | Yes | The file |
 | `material_type` | string | Yes | Type (LECTURE, SECTION, ASSIGNMENT_DESC, OTHER) |
 | `file_type` | string | Yes | File type (pdf, pptx, docx, mp4, etc.) |
 
@@ -1197,6 +1197,7 @@ All Professor endpoints are identical to the Instructor API endpoints. See [Inst
 | GET/PATCH/DELETE | `/api/professor/courses/{id}/` | Course details |
 | GET/POST | `/api/professor/materials/` | List/Upload materials |
 | PATCH/DELETE | `/api/professor/materials/{id}/` | Manage material |
+| GET | `/api/professor/materials/{id}/download/` | **Download material file** |
 | GET/POST | `/api/professor/assignments/` | List/Create assignments |
 | GET/PATCH/DELETE | `/api/professor/assignments/{id}/` | Manage assignment |
 | GET | `/api/professor/submissions/` | List submissions |
@@ -1227,6 +1228,7 @@ All TA endpoints are identical to the Instructor API endpoints. See [Instructor 
 | GET/PATCH/DELETE | `/api/ta/courses/{id}/` | Course details |
 | GET/POST | `/api/ta/materials/` | List/Upload materials |
 | PATCH/DELETE | `/api/ta/materials/{id}/` | Manage material |
+| GET | `/api/ta/materials/{id}/download/` | **Download material file** |
 | GET/POST | `/api/ta/assignments/` | List/Create assignments |
 | GET/PATCH/DELETE | `/api/ta/assignments/{id}/` | Manage assignment |
 | GET | `/api/ta/submissions/` | List submissions |
@@ -1259,6 +1261,7 @@ All TA endpoints are identical to the Instructor API endpoints. See [Instructor 
 | GET/PATCH/DELETE | `/api/instructor/courses/{id}/` | Course details |
 | GET/POST | `/api/instructor/materials/` | List/Upload materials |
 | PATCH/DELETE | `/api/instructor/materials/{id}/` | Manage material |
+| GET | `/api/instructor/materials/{id}/download/` | **Download material file** |
 | GET/POST | `/api/instructor/assignments/` | List/Create assignments |
 | GET/PATCH/DELETE | `/api/instructor/assignments/{id}/` | Manage assignment |
 | GET | `/api/instructor/submissions/` | List submissions |
@@ -1472,9 +1475,6 @@ Same as Create. All fields optional.
 | **Method** | `DELETE` |
 
 Soft delete - sets `is_active` to false.
-
----
-
 ## 4. Materials
 
 ### List Materials
@@ -1483,6 +1483,9 @@ Soft delete - sets `is_active` to false.
 |----------|-------|
 | **Endpoint** | `/api/instructor/materials/` |
 | **Method** | `GET` |
+| **Auth** | Required |
+
+> **Access Rules**: You will only see materials for courses where you are explicitly assigned as the Instructor or TA. Passing a `course_offering` ID for a course you do not manage will return only the courses you own or an empty array.
 
 | Query Params | Type | Description |
 |-------------|------|-------------|
@@ -1499,8 +1502,11 @@ Soft delete - sets `is_active` to false.
         "title": "Lecture 1",
         "description": "Intro to ML",
         "material_type": "LECTURE",
-        "file_url": "http://...",
+        "file_url": "",
+        "file_download_url": "http://localhost:8000/api/professor/materials/1/download/",
         "file_type": "pdf",
+        "file_size": 204800,
+        "uploaded_by": 5,
         "uploaded_by_name": "Dr. Salwa",
         "upload_date": "2024-09-01T10:00:00Z",
         "is_visible_to_students": true,
@@ -1511,40 +1517,147 @@ Soft delete - sets `is_active` to false.
 
 ---
 
-### Upload Material
+### Upload Material (Single or Bulk)
 
 | Property | Value |
 |----------|-------|
 | **Endpoint** | `/api/instructor/materials/` |
 | **Method** | `POST` |
+| **Content-Type** | `multipart/form-data` |
+| **Auth** | Required |
 
-#### Request Body
+> **Important**: This endpoint uploads the actual file binary. Do NOT use `application/json`.
+> `file_type` and `file_size` are detected automatically — do not include them in the request.
+
+#### Request Fields
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `course_offering` | int | Yes | Course offering ID |
-| `title` | string | Yes | Material title |
-| `description` | string | No | Description |
-| `material_type` | string | Yes | Type (LECTURE, SECTION, ASSIGNMENT_DESC, OTHER) |
-| `file_url` | string | Yes | URL to the file |
-| `file_type` | string | Yes | File type (pdf, pptx, docx, mp4) |
-| `file_size` | int | No | File size in bytes |
-| `is_visible_to_students` | bool | No | Visible to students (default: true) |
-| `order_index` | int | No | Display order |
+| `course_offering` | int | **Yes** | Course offering ID |
+| `title` | string | **Yes** | Material title (if bulk, filenames will be appended to distinguish them) |
+| `material_type` | string | **Yes** | `LECTURE` \| `SECTION` \| `ASSIGNMENT_DESC` \| `OTHER` |
+| `file` | binary | **Yes** | The file(s) to upload. **Append multiple `file` fields to upload in bulk**. |
+| `description` | string | No | Optional description |
+| `is_visible_to_students` | bool | No | Default: `true` |
+| `order_index` | int | No | Display order, default: `0` |
+
+#### Allowed File Types & Size Limits
+
+| Extension | Category | Max Size |
+|-----------|----------|----------|
+| `pdf`, `pptx`, `ppt`, `docx`, `doc`, `xlsx`, `xls` | Documents | 100 MB |
+| `txt` | Plain text | 10 MB |
+| `png`, `jpg`, `jpeg`, `gif` | Images | 20 MB |
+| `zip` | Archives | 500 MB |
+| `mp3` | Audio | 200 MB |
+| `mp4` | Video | 2 GB |
+
+#### Example (JavaScript `fetch` for Multiple Files)
+
+```javascript
+const formData = new FormData();
+formData.append('course_offering', '1');
+formData.append('title', 'Lecture 1');
+formData.append('material_type', 'LECTURE');
+formData.append('is_visible_to_students', 'true');
+
+// Append multiple files to the same key
+const files = fileInputElement.files;
+for (let i = 0; i < files.length; i++) {
+    formData.append('file', files[i]);
+}
+
+const response = await fetch('/api/instructor/materials/', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${accessToken}` },
+    body: formData,
+});
+const materials = await response.json();
+```
+
+#### Response (201 Created)
+
+**Note:** If you upload **one** file, the API returns a single JSON object. If you upload **multiple** files, it returns an array of objects.
 
 ```json
-{
-    "course_offering": 1,
-    "title": "Lecture 1",
-    "description": "Intro to ML",
-    "material_type": "LECTURE",
-    "file_url": "https://storage.example.com/lecture1.pdf",
-    "file_type": "pdf",
-    "file_size": 2048576,
-    "is_visible_to_students": true,
-    "order_index": 0
-}
+[
+    {
+        "id": 12,
+        "course_offering": 1,
+        "course_name": "Machine Learning",
+        "title": "Lecture 1 - intro.pdf",
+        "description": "Intro to ML",
+        "material_type": "LECTURE",
+        "file_url": "",
+        "file_download_url": "http://localhost:8000/api/instructor/materials/12/download/",
+        "file_type": "pdf",
+        "file_size": 204800,
+        "uploaded_by": 5,
+        "uploaded_by_name": "Dr. Salwa",
+        "upload_date": "2026-04-12T00:00:00Z",
+        "is_visible_to_students": true,
+        "order_index": 0
+    },
+    {
+        "id": 13,
+        "title": "Lecture 1 - slides.pptx",
+        "...": "..."
+    }
+]
 ```
+
+#### Side Effects
+
+- The files are saved on the server at `media/course_materials/<YYYY>/<MM>/<filename>`.
+- If `is_visible_to_students` is `true`, a `MATERIAL_UPLOAD` **notification** is automatically created for every active enrolled student for *every* file uploaded.
+
+#### Error Responses (Strict Atomic Validation)
+
+If **any single file** in a bulk upload fails validation (e.g. one file is too large or unsupported), the **entire transaction is rolled back** to prevent partial/broken states.
+
+| Status | Details |
+|--------|---------|
+| 400 | Single file validation error: `{"file": ["No file was submitted."]}` |
+| 400 | Bulk error rollback: `{"bulk_errors": [{ "file": "malware.exe", "errors": {"file": ["Unsupported..."]} }]}` |
+| 401 | Missing or invalid JWT token |
+
+---
+
+### Download Material File
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/materials/{id}/download/` |
+| **Method** | `GET` |
+| **Auth** | Required |
+
+Streams the stored file back to the client with the correct MIME type.
+The file is served **inline** (browsers can display PDF/video without forcing a download).
+
+#### Access Rules
+
+| Role | Condition for access |
+|------|---------------------|
+| Professor | Must be the instructor of the course |
+| TA | Must be assigned as a TA of the course |
+| Student (via `/api/student/`) | Must be actively enrolled + `is_visible_to_students = true` |
+
+#### Response (200 OK)
+
+| Header | Example Value |
+|--------|---------------|
+| `Content-Type` | `application/pdf` |
+| `Content-Disposition` | `inline; filename="lecture_1.pdf"` |
+
+Body: raw file bytes (streamed in chunks, no buffering).
+
+#### Error Responses
+
+| Status | Description |
+|--------|-------------|
+| 401 | Missing or invalid JWT |
+| 403 | User is not the instructor, TA, or an enrolled student |
+| 404 | Material not found, or no file binary stored on this record |
 
 ---
 
@@ -1554,6 +1667,12 @@ Soft delete - sets `is_active` to false.
 |----------|-------|
 | **Endpoint** | `/api/instructor/materials/{id}/` |
 | **Method** | `PATCH` |
+| **Content-Type** | `multipart/form-data` |
+| **Auth** | Required |
+
+> **Access Rules**: Only the Instructor or a TA assigned to this material's course can edit it. All other users (including students) receive **403 Forbidden**.
+
+All fields are optional (partial update). Extension and size validation apply to any new file submitted.
 
 ---
 
@@ -1563,6 +1682,11 @@ Soft delete - sets `is_active` to false.
 |----------|-------|
 | **Endpoint** | `/api/instructor/materials/{id}/` |
 | **Method** | `DELETE` |
+| **Auth** | Required |
+
+> **Access Rules**: Only the Instructor or a TA assigned to this material's course can delete it. All other users (including students) receive **403 Forbidden**.
+
+Deletes the database record **and** securely removes the exact file binary from disk storage.
 
 ---
 

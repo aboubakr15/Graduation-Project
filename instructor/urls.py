@@ -5,6 +5,7 @@ from .views import (
     CourseOfferingDetailView,
     MaterialListView,
     MaterialDetailView,
+    MaterialDownloadView,
     AssignmentListView,
     AssignmentDetailView,
     SubmissionListView,
@@ -28,6 +29,7 @@ urlpatterns = [
     # Materials
     path('materials/', MaterialListView.as_view(), name='instructor-materials'),
     path('materials/<int:pk>/', MaterialDetailView.as_view(), name='instructor-material-detail'),
+    path('materials/<int:pk>/download/', MaterialDownloadView.as_view(), name='instructor-material-download'),
     
     # Assignments
     path('assignments/', AssignmentListView.as_view(), name='instructor-assignments'),

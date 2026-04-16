@@ -80,15 +80,123 @@ class CourseOfferingCreateSerializer(serializers.ModelSerializer):
         fields = ['course', 'semester', 'year', 'instructor', 'tas', 'capacity', 'course_schedule', 'is_active']
 
 
+import os
+
+# Per-category file-size limits (bytes)
+_MB = 1024 * 1024
+_GB = 1024 * _MB
+
+_SIZE_LIMITS = {
+    # Office / document types  → 100 MB
+    'pdf':  100 * _MB, 'pptx': 100 * _MB, 'ppt':  100 * _MB,
+    'docx': 100 * _MB, 'doc':  100 * _MB,
+    'xlsx': 100 * _MB, 'xls':  100 * _MB,
+    'txt':   10 * _MB,
+    # Images → 20 MB
+    'png':  20 * _MB, 'jpg':  20 * _MB, 'jpeg': 20 * _MB, 'gif': 20 * _MB,
+    # Archives → 500 MB
+    'zip': 500 * _MB,
+    # Audio → 200 MB
+    'mp3': 200 * _MB,
+    # Video → 2 GB
+    'mp4':   2 * _GB,
+}
+
+
 class MaterialSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True)
     course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
-    
+    # Points to the authenticated download endpoint, not the raw filesystem path.
+    file_download_url = serializers.SerializerMethodField()
+
     class Meta:
         model = CourseMaterial
-        fields = ['id', 'course_offering', 'course_name', 'title', 'description', 'material_type', 'file_url', 'file_type', 'file_size', 'uploaded_by', 'uploaded_by_name', 'upload_date', 'is_visible_to_students', 'order_index']
+        fields = [
+            'id', 'course_offering', 'course_name', 'title', 'description',
+            'material_type', 'file_url', 'file_download_url', 'file_type',
+            'file_size', 'uploaded_by', 'uploaded_by_name', 'upload_date',
+            'is_visible_to_students', 'order_index',
+        ]
+
+    def get_file_download_url(self, obj):
+        """
+        Returns the URL of the *authenticated* download endpoint for this
+        material.  Clients must hit that endpoint with a valid JWT; the view
+        verifies course membership before streaming the file.
+        """
+        request = self.context.get('request')
+        if not request:
+            return None
+        if obj.file:   # stored binary
+            return request.build_absolute_uri(f'/api/professor/materials/{obj.pk}/download/')
+        return obj.file_url or None   # legacy external URL fallback
 
 
+class MaterialUploadSerializer(serializers.ModelSerializer):
+    """
+    Accepts multipart/form-data with a real file binary.
+
+    Required  : course_offering, title, material_type, file
+    Optional  : description, is_visible_to_students, order_index
+
+    file_type and file_size are derived automatically — do NOT send them.
+    """
+    file = serializers.FileField(required=True)
+
+    class Meta:
+        model = CourseMaterial
+        fields = [
+            'course_offering', 'title', 'description',
+            'material_type', 'file',
+            'is_visible_to_students', 'order_index',
+        ]
+
+    def validate_file(self, uploaded_file):
+        ext = os.path.splitext(uploaded_file.name)[1].lstrip('.').lower()
+
+        if ext not in _SIZE_LIMITS:
+            raise serializers.ValidationError(
+                f"Unsupported file type '.{ext}'. "
+                f"Allowed: {', '.join(sorted(_SIZE_LIMITS.keys()))}"
+            )
+
+        limit = _SIZE_LIMITS[ext]
+        if uploaded_file.size > limit:
+            raise serializers.ValidationError(
+                f".{ext} files must be ≤ {limit // _MB} MB "
+                f"(uploaded: {uploaded_file.size // _MB} MB)."
+            )
+
+        return uploaded_file
+
+    def validate_course_offering(self, course_offering):
+        request = self.context.get('request')
+        if not request:
+            return course_offering
+            
+        user = request.user
+        is_instructor = (course_offering.instructor_id == user.id)
+        is_ta = course_offering.tas.filter(id=user.id).exists()
+        
+        if not (is_instructor or is_ta):
+            raise serializers.ValidationError(
+                "You must be the instructor or a TA for this course offering to upload materials."
+            )
+        return course_offering
+
+    def create(self, validated_data):
+        uploaded_file = validated_data['file']
+        ext = os.path.splitext(uploaded_file.name)[1].lstrip('.').lower()
+
+        return CourseMaterial.objects.create(
+            **validated_data,
+            file_url='',        # blank – the `file` FileField holds the binary
+            file_type=ext,
+            file_size=uploaded_file.size,
+        )
+
+
+# Kept for internal / admin use only (URL-based, no file binary).
 class MaterialCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CourseMaterial
