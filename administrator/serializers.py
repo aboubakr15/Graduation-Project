@@ -39,7 +39,7 @@ class DepartmentSerializer(serializers.ModelSerializer):
 class CourseSerializer(serializers.ModelSerializer):
     department_details = DepartmentSerializer(source="department", read_only=True)
     department = serializers.PrimaryKeyRelatedField(
-        queryset=Department.objects.all(), write_only=True
+        queryset=Department.objects.all()
     )
 
     class Meta:
