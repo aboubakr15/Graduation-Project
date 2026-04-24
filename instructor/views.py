@@ -3,8 +3,11 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from django.shortcuts import get_object_or_404
+from django.http import FileResponse, Http404
 from django.utils import timezone
+from django.db import transaction
 from datetime import timedelta
+import mimetypes
 
 from main.models import (
     User, CourseOffering, Enrollment, Assignment, CourseMaterial,
@@ -17,7 +20,7 @@ from .serializers import (
     CourseOfferingDetailSerializer,
     CourseOfferingCreateSerializer,
     MaterialSerializer,
-    MaterialCreateSerializer,
+    MaterialUploadSerializer,
     AssignmentListSerializer,
     AssignmentDetailSerializer,
     AssignmentCreateSerializer,
@@ -122,23 +125,119 @@ class MaterialListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        courses = CourseOffering.objects.filter(
+            instructor=request.user
+        ) | CourseOffering.objects.filter(tas=request.user)
+
         course_id = request.query_params.get('course_offering')
         if course_id:
-            materials = CourseMaterial.objects.filter(course_offering=course_id)
-        else:
-            courses = CourseOffering.objects.filter(
-                instructor=request.user
-            ) | CourseOffering.objects.filter(tas=request.user)
-            materials = CourseMaterial.objects.filter(course_offering__in=courses.distinct())
-        serializer = MaterialSerializer(materials.order_by('-upload_date'), many=True)
+            # Explicitly enforce they only see materials for a course they teach/assist
+            courses = courses.filter(id=course_id)
+            
+        materials = CourseMaterial.objects.filter(course_offering__in=courses.distinct())
+        serializer = MaterialSerializer(
+            materials.order_by('-upload_date'), many=True, context={'request': request}
+        )
         return Response(serializer.data)
 
+    @transaction.atomic
     def post(self, request):
-        serializer = MaterialCreateSerializer(data=request.data)
-        if serializer.is_valid():
-            material = serializer.save(uploaded_by=request.user)
-            return Response(MaterialSerializer(material).data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        """
+        Upload one or multiple course material files.
+
+        Content-Type : multipart/form-data
+        Required fields:
+          course_offering  – int   : ID of the CourseOffering
+          title            – str
+          material_type    – str   : LECTURE | SECTION | ASSIGNMENT_DESC | OTHER
+          file             – binary: passing multiple `file` fields uploads in bulk
+        Optional fields:
+          description, is_visible_to_students, order_index
+        """
+        files = request.FILES.getlist('file')
+        if not files:
+            # Fallback to standard validation so standard error messages apply
+            serializer = MaterialUploadSerializer(data=request.data, context={'request': request})
+            serializer.is_valid()
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        created_materials = []
+        errors = []
+        base_title = request.data.get('title')
+
+        for uploaded_file in files:
+            # Safely copy scalar data fields. Avoids request.data.copy() which crashes
+            # attempting to deep-copy unpicklable file streams like _io.BufferedRandom.
+            data = {k: request.data.get(k) for k in request.data.keys() if k != 'file'}
+            data['file'] = uploaded_file
+
+            # If uploading multiple files under one request, distinguish titles
+            if len(files) > 1:
+                if base_title:
+                    data['title'] = f"{base_title} - {uploaded_file.name}"
+                else:
+                    data['title'] = uploaded_file.name
+
+            serializer = MaterialUploadSerializer(data=data, context={'request': request})
+            if serializer.is_valid():
+                material = serializer.save(uploaded_by=request.user)
+                created_materials.append(material)
+            else:
+                errors.append({
+                    "file": uploaded_file.name,
+                    "errors": serializer.errors
+                })
+
+        if errors:
+            # If any single file validation fails (like size/extension or missing reqs)
+            # rollback the entire database transaction so we don't partially save files.
+            transaction.set_rollback(True)
+            return Response({"bulk_errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        # If we succeed, send notifications
+        for material in created_materials:
+            if material.is_visible_to_students:
+                self._notify_enrolled_students(material)
+
+        # Backward compatibility: return single object for single upload, list for bulk upload
+        if len(files) == 1:
+            return Response(
+                MaterialSerializer(created_materials[0], context={'request': request}).data,
+                status=status.HTTP_201_CREATED,
+            )
+        else:
+            return Response(
+                MaterialSerializer(created_materials, many=True, context={'request': request}).data,
+                status=status.HTTP_201_CREATED,
+            )
+
+    # ------------------------------------------------------------------ helpers
+    @staticmethod
+    def _notify_enrolled_students(material):
+        """
+        Create a Notification row for every student actively enrolled in the
+        course offering associated with this material.
+        """
+        active_enrollments = Enrollment.objects.filter(
+            course_offering=material.course_offering,
+            status=Enrollment.Status.ACTIVE,
+        ).select_related('student')
+
+        notifications = [
+            Notification(
+                user=enrollment.student,
+                title=f"New material: {material.title}",
+                message=(
+                    f"A new {material.get_material_type_display()} has been uploaded "
+                    f"for {material.course_offering.course.name}: \"{material.title}\"."
+                ),
+                notification_type=Notification.NotificationType.MATERIAL_UPLOAD,
+                related_object_type='CourseMaterial',
+                related_object_id=material.id,
+            )
+            for enrollment in active_enrollments
+        ]
+        Notification.objects.bulk_create(notifications)
 
 
 class MaterialDetailView(APIView):
@@ -146,16 +245,110 @@ class MaterialDetailView(APIView):
 
     def patch(self, request, pk):
         material = get_object_or_404(CourseMaterial, pk=pk)
-        serializer = MaterialCreateSerializer(material, data=request.data, partial=True)
+        
+        # Enforce that only the assigned TA or Instructor can modify this material
+        is_instructor = (material.course_offering.instructor_id == request.user.id)
+        is_ta = material.course_offering.tas.filter(id=request.user.id).exists()
+        if not (is_instructor or is_ta):
+            return Response({"error": "You do not have permission to modify this material."}, status=status.HTTP_403_FORBIDDEN)
+            
+        # Re-use MaterialUploadSerializer in partial mode so the same
+        # validation rules (extension, size, course permissions) apply on updates too.
+        serializer = MaterialUploadSerializer(
+            material, 
+            data=request.data, 
+            partial=True, 
+            context={'request': request}
+        )
         if serializer.is_valid():
             serializer.save()
-            return Response(MaterialSerializer(material).data)
+            return Response(MaterialSerializer(material, context={'request': request}).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
         material = get_object_or_404(CourseMaterial, pk=pk)
+        
+        # Enforce that only the assigned TA or Instructor can delete this material
+        is_instructor = (material.course_offering.instructor_id == request.user.id)
+        is_ta = material.course_offering.tas.filter(id=request.user.id).exists()
+        if not (is_instructor or is_ta):
+            return Response({"error": "You do not have permission to delete this material."}, status=status.HTTP_403_FORBIDDEN)
+            
+        # Remove the file from storage when the record is deleted
+        if material.file:
+            material.file.delete(save=False)
         material.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class MaterialDownloadView(APIView):
+    """
+    Authenticated, access-controlled file download.
+
+    GET /api/professor/materials/<pk>/download/
+    GET /api/ta/materials/<pk>/download/
+
+    Access is granted only to:
+      • The course instructor
+      • Any TA assigned to the course
+      • Any student actively enrolled in the course
+            (only when is_visible_to_students = True)
+
+    The file is streamed via Django's FileResponse so large videos
+    do not need to be loaded into memory all at once.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        material = get_object_or_404(
+            CourseMaterial.objects.select_related(
+                'course_offering__instructor', 'course_offering__course'
+            ),
+            pk=pk,
+        )
+
+        user = request.user
+        offering = material.course_offering
+
+        is_instructor = (offering.instructor_id == user.pk)
+        is_ta = offering.tas.filter(pk=user.pk).exists()
+        is_enrolled_student = (
+            material.is_visible_to_students
+            and Enrollment.objects.filter(
+                student=user,
+                course_offering=offering,
+                status=Enrollment.Status.ACTIVE,
+            ).exists()
+        )
+
+        if not (is_instructor or is_ta or is_enrolled_student):
+            return Response(
+                {'detail': 'You do not have access to this material.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not material.file:
+            return Response(
+                {'detail': 'No file is stored for this material.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Guess MIME type from the stored file name
+        mime_type, _ = mimetypes.guess_type(material.file.name)
+        mime_type = mime_type or 'application/octet-stream'
+
+        response = FileResponse(
+            material.file.open('rb'),
+            content_type=mime_type,
+            as_attachment=False,   # inline display for PDF/video in browsers
+        )
+        # Suggest the original filename for downloads
+        import os
+        filename = os.path.basename(material.file.name)
+        response['Content-Disposition'] = (
+            f'inline; filename="{filename}"'
+        )
+        return response
 
 
 class AssignmentListView(APIView):

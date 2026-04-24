@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from django.shortcuts import get_object_or_404
+from django.http import FileResponse
 from .serializers import (
     DashboardSerializer, 
     StudentProfileSerializer, 
@@ -18,8 +19,10 @@ from .serializers import (
 )
 from main.models import (
     User, CourseOffering, Enrollment, TodoItem, ChatConversation, ChatMessage,
-    StudentSubmission, Notification, Assignment, Announcement
+    StudentSubmission, Notification, Assignment, Announcement, CourseMaterial
 )
+import mimetypes
+import os
 
 class StudentDashboardView(APIView):
     permission_classes = [IsAuthenticated]
@@ -267,3 +270,61 @@ class StudentNotificationsView(APIView):
         notification.is_read = request.data.get('is_read', notification.is_read)
         notification.save()
         return Response(NotificationSerializer(notification).data)
+
+
+class StudentMaterialDownloadView(APIView):
+    """
+    Authenticated, enrollment-checked file download for students.
+
+    GET /api/student/materials/<pk>/download/
+
+    Conditions for access:
+      • The student must be actively enrolled in the material’s course.
+      • is_visible_to_students must be True.
+
+    The file is streamed via FileResponse (chunked) so large videos
+    don’t need to be buffered in memory.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        material = get_object_or_404(
+            CourseMaterial.objects.select_related('course_offering__course'),
+            pk=pk,
+        )
+
+        if not material.is_visible_to_students:
+            return Response(
+                {'detail': 'You do not have access to this material.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        is_enrolled = Enrollment.objects.filter(
+            student=request.user,
+            course_offering=material.course_offering,
+            status=Enrollment.Status.ACTIVE,
+        ).exists()
+
+        if not is_enrolled:
+            return Response(
+                {'detail': 'You are not enrolled in this course.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not material.file:
+            return Response(
+                {'detail': 'No file is stored for this material.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        mime_type, _ = mimetypes.guess_type(material.file.name)
+        mime_type = mime_type or 'application/octet-stream'
+
+        response = FileResponse(
+            material.file.open('rb'),
+            content_type=mime_type,
+            as_attachment=False,
+        )
+        filename = os.path.basename(material.file.name)
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response

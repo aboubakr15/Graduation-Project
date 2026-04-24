@@ -184,7 +184,12 @@ class CourseMaterial(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     material_type = models.CharField(max_length=20, choices=MaterialType.choices)
-    file_url = models.URLField()
+    file_url = models.URLField(blank=True)          # kept for backward-compat / external URLs
+    file = models.FileField(                        # actual uploaded file (new)
+        upload_to='course_materials/%Y/%m/',
+        null=True,
+        blank=True,
+    )
     file_type = models.CharField(max_length=20)  # pdf, pptx, docx, mp4, etc.
     file_size = models.BigIntegerField(null=True, blank=True)  # in bytes
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='uploaded_materials')
