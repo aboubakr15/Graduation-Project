@@ -616,6 +616,57 @@ Same as instructor.
 
 ---
 
+## 8. Admin Profile
+
+### Get Admin Profile
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/admin/profile/` |
+| **Method** | `GET` |
+
+Returns admin profile info with system-wide statistics.
+
+#### Response
+
+```json
+{
+    "full_name": "Admin User",
+    "email": "admin@example.com",
+    "department": null,
+    "profile_picture_url": null,
+    "total_students": 150,
+    "total_instructors": 5,
+    "total_courses": 12,
+    "total_tas": 8
+}
+```
+
+---
+
+### Update Admin Profile
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/admin/profile/` |
+| **Method** | `PATCH` |
+
+#### Request Body
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `full_name` | string | Full name |
+| `profile_picture_url` | string | Profile picture URL |
+
+```json
+{
+    "full_name": "John Admin",
+    "profile_picture_url": "https://..."
+}
+```
+
+---
+
 # Student API
 
 > **Base URL**: `/api/student/`  
@@ -1208,6 +1259,7 @@ All Professor endpoints are identical to the Instructor API endpoints. See [Inst
 | GET | `/api/professor/chat/` | List conversations |
 | GET | `/api/professor/chat/messages/` | Get messages |
 | GET/PATCH | `/api/professor/notifications/` | List/Mark notifications |
+| GET/PATCH | `/api/professor/profile/` | **Get/Update profile** |
 
 ---
 
@@ -1239,6 +1291,7 @@ All TA endpoints are identical to the Instructor API endpoints. See [Instructor 
 | GET | `/api/ta/chat/` | List conversations |
 | GET | `/api/ta/chat/messages/` | Get messages |
 | GET/PATCH | `/api/ta/notifications/` | List/Mark notifications |
+| GET/PATCH | `/api/ta/profile/` | **Get/Update profile** |
 
 ---
 
@@ -1272,6 +1325,7 @@ All TA endpoints are identical to the Instructor API endpoints. See [Instructor 
 | GET | `/api/instructor/chat/` | List conversations |
 | GET | `/api/instructor/chat/messages/` | Get messages |
 | GET/PATCH | `/api/instructor/notifications/` | List/Mark notifications |
+| GET/PATCH | `/api/instructor/profile/` | **Get/Update profile** |
 
 ---
 
@@ -2105,6 +2159,56 @@ Returns all chat conversations for courses taught by the instructor/TA.
 | Field | Type | Description |
 |-------|------|-------------|
 | `is_read` | boolean | Mark as read (true/false) |
+
+---
+
+## 11. Profile
+
+### Get Instructor Profile
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/profile/` |
+| **Method** | `GET` |
+
+Returns instructor profile info with teaching-related statistics.
+
+#### Response
+
+```json
+{
+    "full_name": "Dr. Salwa Osman",
+    "email": "salwa@example.com",
+    "department": 1,
+    "profile_picture_url": null,
+    "total_courses": 3,
+    "total_students": 120,
+    "upcoming_assignments": 5
+}
+```
+
+---
+
+### Update Instructor Profile
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/instructor/profile/` |
+| **Method** | `PATCH` |
+
+#### Request Body
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `full_name` | string | Full name |
+| `profile_picture_url` | string | Profile picture URL |
+
+```json
+{
+    "full_name": "Dr. Salwa Osman",
+    "profile_picture_url": "https://..."
+}
+```
 
 ---
 

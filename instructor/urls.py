@@ -15,7 +15,8 @@ from .views import (
     AnnouncementDetailView,
     ChatConversationListView,
     ChatMessageListView,
-    NotificationListView
+    NotificationListView,
+    InstructorProfileView
 )
 
 urlpatterns = [
@@ -52,4 +53,5 @@ urlpatterns = [
     
     # Notifications
     path('notifications/', NotificationListView.as_view(), name='instructor-notifications'),
+    path('profile/', InstructorProfileView.as_view(), name='instructor-profile'),
 ]

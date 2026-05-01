@@ -317,3 +317,35 @@ class EnrollmentCreateUpdateSerializer(serializers.ModelSerializer):
             "status",
             "grade",
         ]
+
+
+class AdminProfileSerializer(serializers.ModelSerializer):
+    total_students = serializers.SerializerMethodField()
+    total_instructors = serializers.SerializerMethodField()
+    total_courses = serializers.SerializerMethodField()
+    total_tas = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "full_name",
+            "email",
+            "department",
+            "profile_picture_url",
+            "total_students",
+            "total_instructors",
+            "total_courses",
+            "total_tas",
+        ]
+
+    def get_total_students(self, obj):
+        return User.objects.filter(primary_role=User.Role.STUDENT).count()
+
+    def get_total_instructors(self, obj):
+        return User.objects.filter(primary_role=User.Role.PROFESSOR).count()
+
+    def get_total_courses(self, obj):
+        return Course.objects.count()
+
+    def get_total_tas(self, obj):
+        return User.objects.filter(primary_role=User.Role.TA).count()

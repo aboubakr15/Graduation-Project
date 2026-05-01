@@ -5,7 +5,7 @@ from main.models import (
     ChatConversation, ChatMessage, Notification,
     StudentSubmission, Department
 )
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Q
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -314,6 +314,43 @@ class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
         fields = ['id', 'title', 'message', 'notification_type', 'related_object_type', 'related_object_id', 'is_read', 'created_at']
+
+
+class InstructorProfileSerializer(serializers.ModelSerializer):
+    total_courses = serializers.SerializerMethodField()
+    total_students = serializers.SerializerMethodField()
+    upcoming_assignments = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            'full_name', 'email', 'department', 'profile_picture_url',
+            'total_courses', 'total_students', 'upcoming_assignments'
+        ]
+
+    def get_total_courses(self, obj):
+        return CourseOffering.objects.filter(
+            Q(instructor=obj) | Q(tas=obj)
+        ).distinct().count()
+
+    def get_total_students(self, obj):
+        course_ids = CourseOffering.objects.filter(
+            Q(instructor=obj) | Q(tas=obj)
+        ).distinct().values_list('id', flat=True)
+        return Enrollment.objects.filter(
+            course_offering_id__in=course_ids,
+            status=Enrollment.Status.ACTIVE
+        ).values_list('student_id', flat=True).distinct().count()
+
+    def get_upcoming_assignments(self, obj):
+        from django.utils import timezone
+        course_ids = CourseOffering.objects.filter(
+            Q(instructor=obj) | Q(tas=obj)
+        ).distinct().values_list('id', flat=True)
+        return Assignment.objects.filter(
+            course_offering_id__in=course_ids,
+            due_date__gte=timezone.now()
+        ).count()
 
 
 class DashboardSerializer(serializers.Serializer):

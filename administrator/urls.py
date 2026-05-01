@@ -3,7 +3,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     DashboardViewSet, CourseViewSet, UserViewSet, 
     AnnouncementViewSet, MaterialViewSet, ChatViewSet, NotificationViewSet,
-    DepartmentViewSet, CourseOfferingViewSet, EnrollmentViewSet
+    DepartmentViewSet, CourseOfferingViewSet, EnrollmentViewSet,
+    AdminProfileView
 )
 
 router = DefaultRouter()
@@ -25,4 +26,5 @@ router.register(r'dashboard', DashboardViewSet, basename='dashboard')
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('profile/', AdminProfileView.as_view(), name='admin-profile'),
 ]
