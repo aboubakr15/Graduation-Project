@@ -182,6 +182,12 @@ Returns success status (empty body).
     "gender_distribution": {
         "male_percentage": 55.5,
         "female_percentage": 44.5
+    },
+    "students_per_department": {
+        "Computer Science": 60,
+        "Information Systems": 45,
+        "Software Engineering": 40,
+        "Unassigned": 5
     }
 }
 ```

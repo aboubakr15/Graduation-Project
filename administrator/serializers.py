@@ -19,6 +19,7 @@ class AdminDashboardSummarySerializer(serializers.Serializer):
     total_doctors = serializers.IntegerField()
     total_tas = serializers.IntegerField()
     gender_distribution = serializers.DictField()
+    students_per_department = serializers.DictField()
 
 
 class DepartmentSerializer(serializers.ModelSerializer):

@@ -37,6 +37,17 @@ class AdminDashboardService:
         male_percentage = (male_count / total_users * 100) if total_users > 0 else 0
         female_percentage = (female_count / total_users * 100) if total_users > 0 else 0
 
+        students_per_department = (
+            User.objects.filter(primary_role=User.Role.STUDENT)
+            .values("department__name", "department__id")
+            .annotate(count=Count("id"))
+            .order_by("-count")
+        )
+        students_by_dept = {
+            item["department__name"] or "Unassigned": item["count"]
+            for item in students_per_department
+        }
+
         return {
             "total_students": total_students,
             "total_courses": total_courses,
@@ -46,6 +57,7 @@ class AdminDashboardService:
                 "male_percentage": round(male_percentage, 2),
                 "female_percentage": round(female_percentage, 2),
             },
+            "students_per_department": students_by_dept,
         }
 
 
