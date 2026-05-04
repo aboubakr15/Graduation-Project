@@ -9,11 +9,12 @@ class StudentProfileSerializer(serializers.ModelSerializer):
     enrolled_hours = serializers.SerializerMethodField()
     daily_streak_mock = serializers.SerializerMethodField()
     grades = serializers.SerializerMethodField()
+    department_name = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
-            'full_name', 'student_id', 'department', 'current_gpa',
+            'full_name', 'student_id', 'department_name', 'current_gpa',
             'student_current_level', 'current_streak', 'profile_picture_url', 'enrolled_hours',
             'daily_streak_mock', 'grades'
         ]
@@ -47,6 +48,9 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             }
             for e in enrollments
         ]
+
+    def get_department_name(self, obj):
+        return obj.department.name if obj.department else None
 
 class AnnouncementSerializer(serializers.ModelSerializer):
     author_name = serializers.CharField(source='author.full_name', read_only=True)

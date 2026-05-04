@@ -1093,7 +1093,7 @@ Returns detailed profile info including current academic level and grades.
 {
     "full_name": "Shahd Shaban",
     "student_id": "20220236",
-    "department": 1,
+    "department_name": "Computer Science",
     "current_gpa": "3.80",
     "student_current_level": 4,
     "current_streak": 54,
