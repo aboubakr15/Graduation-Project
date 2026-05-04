@@ -8,17 +8,17 @@ from django.db.models import Sum
 class StudentProfileSerializer(serializers.ModelSerializer):
     enrolled_hours = serializers.SerializerMethodField()
     daily_streak_mock = serializers.SerializerMethodField()
+    grades = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
-            'full_name', 'student_id', 'department', 'current_gpa', 
-            'current_streak', 'profile_picture_url', 'enrolled_hours',
-            'daily_streak_mock'
+            'full_name', 'student_id', 'department', 'current_gpa',
+            'student_current_level', 'current_streak', 'profile_picture_url', 'enrolled_hours',
+            'daily_streak_mock', 'grades'
         ]
 
     def get_enrolled_hours(self, obj):
-        # Calculate total credit hours for active enrollments
         active_enrollments = Enrollment.objects.filter(
             student=obj, status=Enrollment.Status.ACTIVE
         )
@@ -26,12 +26,27 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         return total_hours
 
     def get_daily_streak_mock(self, obj):
-        # Mock data for the UI week view (Mon-Sun)
-        # In a real app, we'd query a daily login log table.
         return {
             "Mon": True, "Tue": True, "Wed": False, 
             "Thu": True, "Fri": False, "Sat": False, "Sun": False
         }
+
+    def get_grades(self, obj):
+        enrollments = Enrollment.objects.filter(
+            student=obj,
+            grade__isnull=False
+        ).select_related('course_offering__course').order_by('-enrollment_date')
+        return [
+            {
+                'course_name': e.course_offering.course.name,
+                'course_code': e.course_offering.course.code,
+                'grade': str(e.grade),
+                'status': e.status,
+                'semester': e.course_offering.semester,
+                'year': e.course_offering.year,
+            }
+            for e in enrollments
+        ]
 
 class AnnouncementSerializer(serializers.ModelSerializer):
     author_name = serializers.CharField(source='author.full_name', read_only=True)

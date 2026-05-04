@@ -1085,7 +1085,49 @@ Returns a combined list of manual to-do items and pending assignments.
 | **Endpoint** | `/api/student/profile/` |
 | **Method** | `GET` |
 
-Returns detailed profile info. Same structure as `dashboard.profile`.
+Returns detailed profile info including current academic level and grades.
+
+#### Response
+
+```json
+{
+    "full_name": "Shahd Shaban",
+    "student_id": "20220236",
+    "department": 1,
+    "current_gpa": "3.80",
+    "student_current_level": 4,
+    "current_streak": 54,
+    "profile_picture_url": null,
+    "enrolled_hours": 18,
+    "daily_streak_mock": {
+        "Mon": true,
+        "Tue": true,
+        "Wed": false,
+        "Thu": true,
+        "Fri": false,
+        "Sat": false,
+        "Sun": false
+    },
+    "grades": [
+        {
+            "course_name": "Machine Learning",
+            "course_code": "CS301",
+            "grade": "95.00",
+            "status": "COMPLETED",
+            "semester": "Fall",
+            "year": 2024
+        },
+        {
+            "course_name": "Data Structures",
+            "course_code": "CS201",
+            "grade": "88.50",
+            "status": "COMPLETED",
+            "semester": "Spring",
+            "year": 2023
+        }
+    ]
+}
+```
 
 ---
 
