@@ -106,30 +106,24 @@ _SIZE_LIMITS = {
 class MaterialSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True)
     course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
-    # Points to the authenticated download endpoint, not the raw filesystem path.
     file_download_url = serializers.SerializerMethodField()
 
     class Meta:
         model = CourseMaterial
         fields = [
             'id', 'course_offering', 'course_name', 'title', 'description',
-            'material_type', 'file_url', 'file_download_url', 'file_type',
+            'material_type', 'file_download_url', 'file_type',
             'file_size', 'uploaded_by', 'uploaded_by_name', 'upload_date',
             'is_visible_to_students', 'order_index',
         ]
 
     def get_file_download_url(self, obj):
-        """
-        Returns the URL of the *authenticated* download endpoint for this
-        material.  Clients must hit that endpoint with a valid JWT; the view
-        verifies course membership before streaming the file.
-        """
         request = self.context.get('request')
         if not request:
             return None
-        if obj.file:   # stored binary
+        if obj.file:
             return request.build_absolute_uri(f'/api/professor/materials/{obj.pk}/download/')
-        return obj.file_url or None   # legacy external URL fallback
+        return None
 
 
 class MaterialUploadSerializer(serializers.ModelSerializer):
@@ -190,7 +184,6 @@ class MaterialUploadSerializer(serializers.ModelSerializer):
 
         return CourseMaterial.objects.create(
             **validated_data,
-            file_url='',        # blank – the `file` FileField holds the binary
             file_type=ext,
             file_size=uploaded_file.size,
         )

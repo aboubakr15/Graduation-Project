@@ -129,9 +129,19 @@ class CourseListSerializer(serializers.ModelSerializer):
         return 45 # Mock value
 
 class MaterialSerializer(serializers.ModelSerializer):
+    file_download_url = serializers.SerializerMethodField()
+
     class Meta:
         model = CourseMaterial
-        fields = ['id', 'title', 'description', 'material_type', 'file_url', 'is_visible_to_students']
+        fields = ['id', 'title', 'description', 'material_type', 'file_download_url', 'is_visible_to_students']
+
+    def get_file_download_url(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return None
+        if obj.file:
+            return request.build_absolute_uri(f'/api/student/materials/{obj.pk}/download/')
+        return None
 
 class AssignmentSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()

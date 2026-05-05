@@ -847,7 +847,7 @@ Returns detailed information about a specific course offering, including materia
             "title": "Lecture 1",
             "description": "Intro to ML",
             "material_type": "LECTURE",
-            "file_url": "http://...",
+            "file_download_url": "http://localhost:8000/api/student/materials/10/download/",
             "is_visible_to_students": true
         }
     ],
@@ -1527,7 +1527,7 @@ Returns courses taught by the professor or assisted by the TA.
             "title": "Lecture 1",
             "description": "Intro to ML",
             "material_type": "LECTURE",
-            "file_url": "http://...",
+            "file_download_url": "http://localhost:8000/api/professor/materials/1/download/",
             "is_visible_to_students": true,
             "upload_date": "2024-09-01T10:00:00Z"
         }
@@ -1604,7 +1604,6 @@ Soft delete - sets `is_active` to false.
         "title": "Lecture 1",
         "description": "Intro to ML",
         "material_type": "LECTURE",
-        "file_url": "",
         "file_download_url": "http://localhost:8000/api/professor/materials/1/download/",
         "file_type": "pdf",
         "file_size": 204800,
@@ -1690,7 +1689,6 @@ const materials = await response.json();
         "title": "Lecture 1 - intro.pdf",
         "description": "Intro to ML",
         "material_type": "LECTURE",
-        "file_url": "",
         "file_download_url": "http://localhost:8000/api/instructor/materials/12/download/",
         "file_type": "pdf",
         "file_size": 204800,
