@@ -95,7 +95,7 @@ class CourseOfferingListView(APIView):
         serializer = CourseOfferingCreateSerializer(data=request.data)
         if serializer.is_valid():
             course = serializer.save(instructor=request.user)
-            return Response(CourseOfferingDetailSerializer(course).data, status=status.HTTP_201_CREATED)
+            return Response(CourseOfferingDetailSerializer(course, context={'request': request}).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -104,7 +104,7 @@ class CourseOfferingDetailView(APIView):
 
     def get(self, request, pk):
         course = get_object_or_404(CourseOffering, pk=pk)
-        serializer = CourseOfferingDetailSerializer(course)
+        serializer = CourseOfferingDetailSerializer(course, context={'request': request})
         return Response(serializer.data)
 
     def patch(self, request, pk):
@@ -112,7 +112,7 @@ class CourseOfferingDetailView(APIView):
         serializer = CourseOfferingCreateSerializer(course, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            return Response(CourseOfferingDetailSerializer(course).data)
+            return Response(CourseOfferingDetailSerializer(course, context={'request': request}).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):

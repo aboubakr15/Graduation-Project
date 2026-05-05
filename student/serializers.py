@@ -170,7 +170,7 @@ class CourseDetailSerializer(serializers.ModelSerializer):
 
     def get_materials(self, obj):
         mats = CourseMaterial.objects.filter(course_offering=obj, is_visible_to_students=True)
-        return MaterialSerializer(mats, many=True).data
+        return MaterialSerializer(mats, many=True, context=self.context).data
 
 class ToDoItemSerializer(serializers.ModelSerializer):
     course_name = serializers.SerializerMethodField()
