@@ -21,9 +21,30 @@ import sys
 import json
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 from .grading_schemas import GradingOutput, CriteriaScore
+
+def sanitize_xml(text: str) -> str:
+    """
+    Sanitize text to prevent XML injection in prompts.
+    Replaces common XML/HTML special characters.
+    """
+    if not text:
+        return ""
+    return (
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&apos;")
+    )
+
+def to_dict(obj: Any) -> Dict[str, Any]:
+    """Compatibility helper to convert Pydantic models to dict (v1/v2)."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    return obj.dict()
 
 logger = logging.getLogger(__name__)
 
@@ -266,9 +287,9 @@ class GradingEngine:
             defaults={
                 'total_score': grading_output.total_score,
                 'max_score': sum(c.max_points for c in grading_output.criteria_breakdown),
-                'criteria_breakdown': [c.model_dump() for c in grading_output.criteria_breakdown],
+                'criteria_breakdown': [to_dict(c) for c in grading_output.criteria_breakdown],
                 'feedback_summary': grading_output.overall_feedback,
-                'raw_llm_response': grading_output.model_dump(),
+                'raw_llm_response': to_dict(grading_output),
             }
         )
 
@@ -298,7 +319,7 @@ class GradingEngine:
         prompt = SUBJECTIVE_PROMPT.format(
             rubric_json=rubric_json,
             model_answer=assignment.model_answer_text or "(No model answer provided)",
-            student_submission=submission.submitted_text,
+            student_submission=sanitize_xml(submission.submitted_text),
         )
 
         logger.info(f"Sending SUBJECTIVE grading prompt for submission #{submission.pk}")
@@ -329,7 +350,7 @@ class GradingEngine:
         prompt = OBJECTIVE_PROMPT.format(
             rubric_json=rubric_json,
             model_answer=assignment.model_answer_text or "(No model answer provided)",
-            student_submission=submission.submitted_text,
+            student_submission=sanitize_xml(submission.submitted_text),
             test_case_results=test_case_results_json,
         )
 
