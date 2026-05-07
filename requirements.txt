@@ -21,13 +21,28 @@ langchain-huggingface==1.1.0
 langchain-text-splitters>=0.3.0
 chromadb==1.3.5
 sentence-transformers==5.2.1
+rank-bm25==0.2.2
+numpy==1.26.4
 pydantic==2.13.2
 python-dotenv==1.0.0
 
-# Document Processing
+# Document & Multimedia Processing
 python-docx==1.1.0
 PyPDF2==3.0.1
 python-pptx==1.0.2
+docx2txt==0.9
+unstructured==0.22.21
+pdfminer.six==20221105
+pdfplumber==0.10.3
+PyMuPDF==1.26.7
+pytesseract==0.3.13
+Pillow==12.0.0
+youtube-transcript-api==1.2.3
+yt-dlp==2025.12.8
+faster-whisper==1.2.1
+faiss-cpu==1.7.4
+arabic-reshaper==3.0.0
+python-bidi==0.6.7
 
 # Server & Utilities
 gunicorn==23.0.0
