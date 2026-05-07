@@ -22,6 +22,7 @@ from main.models import (
     User, CourseOffering, Enrollment, TodoItem, ChatConversation, ChatMessage,
     StudentSubmission, Notification, Assignment, Announcement, CourseMaterial
 )
+from grading.models import GradingResult
 import mimetypes
 import os
 
@@ -388,3 +389,183 @@ class StudentMaterialDownloadView(APIView):
         filename = os.path.basename(material.file.name)
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Rubric-Driven Auto Revision Engine — Student Views
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# These views use models from main/ and serializers from grading/.
+# The grading app itself registers NO URLs (Hollow App pattern).
+# ══════════════════════════════════════════════════════════════════════════════
+
+from grading.serializers import (
+    SubmissionCreateSerializer,
+    GradedSubmissionSerializer,
+    GradingResultSerializer,
+)
+
+import logging
+logger_grading = logging.getLogger(__name__)
+
+
+class StudentRubricSubmitView(APIView):
+    """
+    POST → Student submits their text/code for a rubric-graded assignment.
+           The system automatically grades the submission using the AI engine.
+
+    Flow:
+        1. Validate the student is enrolled in the course.
+        2. Create or update the StudentSubmission.
+        3. Trigger the GradingEngine to auto-grade.
+        4. Return the submission with grading results.
+
+    Access: Students only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.primary_role != User.Role.STUDENT:
+            return Response(
+                {"error": "Only students can submit assignments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = SubmissionCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        assignment_id = serializer.validated_data['assignment_id']
+        submitted_text = serializer.validated_data['submitted_text']
+
+        assignment = get_object_or_404(Assignment, pk=assignment_id)
+
+        # Verify enrollment
+        if not Enrollment.objects.filter(
+            student=request.user,
+            course_offering=assignment.course_offering,
+            status=Enrollment.Status.ACTIVE
+        ).exists():
+            return Response(
+                {"error": "You are not enrolled in this course."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Create or update submission
+        submission, created = StudentSubmission.objects.update_or_create(
+            student=request.user,
+            assignment=assignment,
+            defaults={
+                'submitted_text': submitted_text,
+                'status': StudentSubmission.Status.SUBMITTED,
+            }
+        )
+
+        logger_grading.info(
+            f"Submission {'created' if created else 'updated'}: "
+            f"#{submission.pk} by {request.user.full_name} "
+            f"for '{assignment.title}'"
+        )
+
+        # ── Auto-Grade ─────────────────────────────────────────────────────────
+        # Trigger the GradingEngine synchronously on submission.
+        # For production, consider Celery for async task processing.
+        # ────────────────────────────────────────────────────────────────────
+        try:
+            from ai_engine.services.grading_service import get_grading_engine
+            engine = get_grading_engine()
+            grading_result = engine.grade_submission(submission.pk)
+
+            logger_grading.info(
+                f"Auto-grading complete: {grading_result.total_score}/{grading_result.max_score}"
+            )
+        except Exception as e:
+            logger_grading.error(f"Auto-grading failed for submission #{submission.pk}: {e}")
+            # Return the submission even if grading failed — don't lose student work
+            return Response(
+                {
+                    "submission": GradedSubmissionSerializer(submission).data,
+                    "grading_error": str(e),
+                    "message": "Submission saved but auto-grading encountered an error. "
+                               "A TA will review manually.",
+                },
+                status=status.HTTP_201_CREATED
+            )
+
+        # Refresh to pick up the grading_result relation
+        submission.refresh_from_db()
+
+        return Response(
+            {
+                "submission": GradedSubmissionSerializer(submission).data,
+                "message": "Submission received and graded successfully.",
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+
+class StudentGradingResultListView(APIView):
+    """
+    GET → Students see all their rubric grading results across all courses.
+
+    Optional query params:
+        - assignment_id: Filter to a specific assignment.
+        - course_offering: Filter to a specific course.
+
+    Access: Students only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.primary_role != User.Role.STUDENT:
+            return Response(
+                {"error": "This endpoint is for students only."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        results = GradingResult.objects.filter(
+            submission__student=request.user
+        ).select_related(
+            'submission__assignment__course_offering__course',
+            'submission__student'
+        ).order_by('-graded_at')
+
+        assignment_id = request.query_params.get('assignment_id')
+        if assignment_id:
+            results = results.filter(submission__assignment_id=assignment_id)
+
+        course_id = request.query_params.get('course_offering')
+        if course_id:
+            results = results.filter(
+                submission__assignment__course_offering_id=course_id
+            )
+
+        serializer = GradingResultSerializer(results, many=True)
+        return Response(serializer.data)
+
+
+class StudentGradingResultDetailView(APIView):
+    """
+    GET → View a single grading result detail.
+
+    Access: Students can only see their own results.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        result = get_object_or_404(
+            GradingResult.objects.select_related(
+                'submission__student', 'submission__assignment'
+            ),
+            pk=pk
+        )
+
+        # Students can only see their own results
+        if result.submission.student_id != request.user.id:
+            return Response(
+                {"error": "You can only view your own grading results."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = GradingResultSerializer(result)
+        return Response(serializer.data)

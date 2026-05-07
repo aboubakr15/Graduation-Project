@@ -12,6 +12,10 @@ from .views import (
     StudentGradesView,
     StudentNotificationsView,
     StudentMaterialDownloadView,
+    # Rubric-Driven Auto Revision Engine
+    StudentRubricSubmitView,
+    StudentGradingResultListView,
+    StudentGradingResultDetailView,
 )
 
 urlpatterns = [
@@ -29,4 +33,10 @@ urlpatterns = [
     path('chat/', StudentChatBotView.as_view(), name='student-chat'),
     path('chat/<int:pk>/', StudentChatConversationDetailView.as_view(), name='student-chat-detail'),
     path('materials/<int:pk>/download/', StudentMaterialDownloadView.as_view(), name='student-material-download'),
+
+    # ── Rubric-Driven Auto Revision Engine ──────────────────────────────
+    path('rubric-submit/', StudentRubricSubmitView.as_view(), name='student-rubric-submit'),
+    path('grading-results/', StudentGradingResultListView.as_view(), name='student-grading-results'),
+    path('grading-results/<int:pk>/', StudentGradingResultDetailView.as_view(), name='student-grading-result-detail'),
 ]
+

@@ -13,6 +13,7 @@ from main.models import (
     User, CourseOffering, Enrollment, Assignment, CourseMaterial,
     Announcement, ChatConversation, ChatMessage, Notification, StudentSubmission
 )
+from grading.models import GradingResult
 
 from .serializers import (
     DashboardSerializer,
@@ -622,3 +623,197 @@ class NotificationListView(APIView):
         notification.is_read = request.data.get('is_read', notification.is_read)
         notification.save()
         return Response(NotificationSerializer(notification).data)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Rubric-Driven Auto Revision Engine — TA / Professor Views
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# These views use models from main/ and serializers from grading/.
+# The grading app itself registers NO URLs (Hollow App pattern).
+# ══════════════════════════════════════════════════════════════════════════════
+
+from grading.serializers import (
+    RubricAssignmentCreateSerializer,
+    RubricAssignmentListSerializer,
+    RubricAssignmentDetailSerializer,
+    GradedSubmissionSerializer,
+    GradingResultSerializer,
+    GradingResultDebugSerializer,
+)
+
+import logging
+logger = logging.getLogger(__name__)
+
+
+def _is_ta_or_professor(user):
+    """Check if the user has TA or Professor role."""
+    return user.primary_role in (User.Role.TA, User.Role.PROFESSOR)
+
+
+class RubricAssignmentListCreateView(APIView):
+    """
+    GET  → List all rubric-graded assignments for the instructor's courses.
+    POST → Create a new assignment with rubric grading enabled.
+
+    Access: TA / Professor only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can view rubric assignments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        courses = CourseOffering.objects.filter(
+            instructor=request.user
+        ) | CourseOffering.objects.filter(tas=request.user)
+        courses = courses.distinct()
+
+        assignments = Assignment.objects.filter(
+            course_offering__in=courses,
+            grading_type__isnull=False
+        ).select_related(
+            'course_offering__course', 'created_by'
+        ).order_by('-created_at')
+
+        course_id = request.query_params.get('course_offering')
+        if course_id:
+            assignments = assignments.filter(course_offering_id=course_id)
+
+        serializer = RubricAssignmentListSerializer(assignments, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can create rubric assignments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = RubricAssignmentCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            assignment = serializer.save(created_by=request.user)
+            logger.info(
+                f"Rubric assignment created: '{assignment.title}' "
+                f"(type={assignment.grading_type}) by {request.user.full_name}"
+            )
+            return Response(
+                RubricAssignmentDetailSerializer(assignment).data,
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RubricAssignmentDetailView(APIView):
+    """
+    GET    → Full assignment detail with submissions and grading results.
+    PATCH  → Update assignment fields (rubric, model answer, etc.).
+    DELETE → Delete assignment.
+
+    Access: TA / Professor only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can view assignment details."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        assignment = get_object_or_404(Assignment, pk=pk)
+        serializer = RubricAssignmentDetailSerializer(assignment)
+        return Response(serializer.data)
+
+    def patch(self, request, pk):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can update assignments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        assignment = get_object_or_404(Assignment, pk=pk)
+        serializer = RubricAssignmentCreateSerializer(
+            assignment, data=request.data, partial=True
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(RubricAssignmentDetailSerializer(assignment).data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can delete assignments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        assignment = get_object_or_404(Assignment, pk=pk)
+        assignment.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class RegradeSubmissionView(APIView):
+    """
+    POST → Re-trigger AI grading for a specific submission.
+           Useful when rubric was updated or LLM result was unsatisfactory.
+
+    Access: TA / Professor only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can re-trigger grading."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        submission = get_object_or_404(StudentSubmission, pk=pk)
+
+        if not submission.submitted_text:
+            return Response(
+                {"error": "This submission has no text content to grade."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            from ai_engine.services.grading_service import get_grading_engine
+            engine = get_grading_engine()
+            grading_result = engine.grade_submission(submission.pk)
+
+            return Response({
+                "message": "Re-grading complete.",
+                "result": GradingResultDebugSerializer(grading_result).data,
+            })
+        except Exception as e:
+            logger.error(f"Re-grading failed for submission #{pk}: {e}")
+            return Response(
+                {"error": f"Re-grading failed: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class InstructorGradingResultView(APIView):
+    """
+    GET → View a specific grading result with debug info (raw_llm_response).
+
+    Access: TA / Professor only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can view grading debug info."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        result = get_object_or_404(
+            GradingResult.objects.select_related(
+                'submission__student', 'submission__assignment'
+            ),
+            pk=pk
+        )
+        serializer = GradingResultDebugSerializer(result)
+        return Response(serializer.data)

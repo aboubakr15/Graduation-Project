@@ -15,7 +15,12 @@ from .views import (
     AnnouncementDetailView,
     ChatConversationListView,
     ChatMessageListView,
-    NotificationListView
+    NotificationListView,
+    # Rubric-Driven Auto Revision Engine
+    RubricAssignmentListCreateView,
+    RubricAssignmentDetailView,
+    RegradeSubmissionView,
+    InstructorGradingResultView,
 )
 
 urlpatterns = [
@@ -52,4 +57,11 @@ urlpatterns = [
     
     # Notifications
     path('notifications/', NotificationListView.as_view(), name='instructor-notifications'),
+
+    # ── Rubric-Driven Auto Revision Engine ──────────────────────────────
+    path('rubric-assignments/', RubricAssignmentListCreateView.as_view(), name='instructor-rubric-assignments'),
+    path('rubric-assignments/<int:pk>/', RubricAssignmentDetailView.as_view(), name='instructor-rubric-assignment-detail'),
+    path('submissions/<int:pk>/regrade/', RegradeSubmissionView.as_view(), name='instructor-submission-regrade'),
+    path('grading-results/<int:pk>/', InstructorGradingResultView.as_view(), name='instructor-grading-result'),
 ]
+

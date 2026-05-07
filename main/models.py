@@ -218,6 +218,12 @@ class Assignment(models.Model):
     class SubmissionLocation(models.TextChoices):
         ONLINE = 'ONLINE', 'Online'
         IN_UNIVERSITY = 'IN_UNIVERSITY', 'In University'
+
+    # ── Rubric-Driven Auto Revision Engine ──────────────────────────────
+    class GradingType(models.TextChoices):
+        SUBJECTIVE = 'SUBJECTIVE', 'Subjective (Essay/Text)'
+        OBJECTIVE = 'OBJECTIVE', 'Objective (Code/Math)'
+    # ────────────────────────────────────────────────────────────────────
     
     course_offering = models.ForeignKey(CourseOffering, on_delete=models.CASCADE, related_name='assignments')
     title = models.CharField(max_length=255)
@@ -228,6 +234,37 @@ class Assignment(models.Model):
     is_auto_correctable = models.BooleanField(default=False)
     questions = models.JSONField(default=list, blank=True)  # Structured representation of questions if assignment type is QUIZ/EXAM
     model_answers = models.JSONField(default=dict, blank=True)  # Structured data for auto-grading
+
+    # ── Rubric-Driven Auto Revision Engine (new fields) ─────────────────
+    # Determines the grading track: SUBJECTIVE (essay) vs OBJECTIVE (code).
+    grading_type = models.CharField(
+        max_length=20,
+        choices=GradingType.choices,
+        null=True,
+        blank=True,
+        help_text='Set to enable rubric-based AI grading. NULL = legacy grading.'
+    )
+    # TA-provided rubric: [{"criteria_name": str, "max_points": float, "description": str}, ...]
+    rubric = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='JSON array of rubric criteria for AI grading.'
+    )
+    # Full model answer text for the LLM to compare against.
+    model_answer_text = models.TextField(
+        blank=True,
+        default='',
+        help_text='Reference model answer for rubric-based AI grading.'
+    )
+    # Test cases for OBJECTIVE assignments (code execution).
+    # Format: [{"input": str, "expected_output": str, "weight": float}, ...]
+    test_cases = models.JSONField(
+        default=list,
+        blank=True,
+        null=True,
+        help_text='Test cases for OBJECTIVE code assignments. NULL if not applicable.'
+    )
+    # ────────────────────────────────────────────────────────────────────
     
     due_date = models.DateTimeField()
     total_points = models.DecimalField(max_digits=6, decimal_places=2,validators=[MinValueValidator(0)])
@@ -259,6 +296,14 @@ class StudentSubmission(models.Model):
     submission_date = models.DateTimeField(auto_now_add=True)
     file_url = models.URLField(null=True, blank=True)
     student_answers = models.JSONField(default=dict, blank=True)
+    # ── Rubric-Driven Auto Revision Engine ──────────────────────────────
+    # Free-text or code content for rubric-based AI grading.
+    submitted_text = models.TextField(
+        blank=True,
+        default='',
+        help_text='Free-text essay or code content for AI grading.'
+    )
+    # ────────────────────────────────────────────────────────────────────
     status = models.CharField(max_length=20, choices=Status.choices)
     notes = models.TextField(blank=True)
     
@@ -292,6 +337,7 @@ class AutoCorrectionResult(models.Model):
         if self.max_score > 0:
             return (self.score / self.max_score) * 100
         return 0
+
 
 
 class ChatConversation(models.Model):
