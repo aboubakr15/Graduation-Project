@@ -121,6 +121,24 @@ class StudentToDoListView(ListCreateAPIView):
     def perform_create(self, serializer):
         serializer.save(student=self.request.user)
 
+
+class StudentToDoDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        todo = get_object_or_404(TodoItem, pk=pk, student=request.user)
+        is_completed = request.data.get('is_completed')
+        if is_completed is not None:
+            todo.is_completed = is_completed
+            todo.save()
+        serializer = ToDoItemSerializer(todo)
+        return Response(serializer.data)
+
+    def delete(self, request, pk):
+        todo = get_object_or_404(TodoItem, pk=pk, student=request.user)
+        todo.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 class StudentProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
