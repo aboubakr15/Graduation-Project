@@ -18,14 +18,12 @@ DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 ALLOWED_HOSTS = [
     'backend-copy-production-fef9.up.railway.app',
     'graduation-project-production-be44.up.railway.app',
-    'backend-copy-production-fef9.up.railway.app',
     '127.0.0.1',
     'localhost',
     ]
 CSRF_TRUSTED_ORIGINS = [
     'https://backend-copy-production-fef9.up.railway.app',
     'https://graduation-project-production-be44.up.railway.app',
-    'https://backend-copy-production-fef9.up.railway.app',
     'http://127.0.0.1:8000',
     ]
 
