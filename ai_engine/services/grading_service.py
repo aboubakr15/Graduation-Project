@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Rubric-Driven Auto Revision Engine — Grading Service
 =====================================================
@@ -21,7 +22,11 @@ import sys
 import json
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from grading.models import GradingResult
+    from main.models import StudentSubmission, Assignment
 
 from .grading_schemas import GradingOutput, CriteriaScore
 
@@ -232,7 +237,7 @@ class GradingEngine:
 
         return self._llm
 
-    def grade_submission(self, submission_id: int) -> 'GradingResult':
+    def grade_submission(self, submission_id: int) -> GradingResult:
         """
         Main orchestrator — fetches submission, determines track, calls LLM,
         and saves the structured result to the database.
