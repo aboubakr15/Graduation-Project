@@ -1,100 +1,175 @@
-# 🎓 EduEra API Documentation
+# Educational Copilot — AI API Documentation
+> **Version**: 2.0  
+> **Topic**: AI Services & Intelligent Automation  
+> **Last Updated**: May 2026
 
-Welcome to the EduEra Backend API. This system is a unified academic platform integrated with a RAG (Retrieval-Augmented Generation) AI engine.
+This document focuses exclusively on the **AI-powered endpoints** within the platform, covering RAG-based chat, presentation generation, and the rubric-driven grading engine.
 
-## 🔑 Authentication
-All APIs (except login) require a **JWT Bearer Token** in the header:
-`Authorization: Bearer <your_access_token>`
+---
 
-### 1. Login
-*   **Endpoint**: `POST /api/token/`
-*   **Request Body**:
-    ```json
-    {
-      "email": "student001@eduera.com",
-      "password": "your_password"
+## Table of Contents
+
+1. [AI Chat & Research Assistant (RAG)](#1-ai-chat--research-assistant-rag)
+2. [AI Presentation Generator](#2-ai-presentation-generator)
+3. [AI Rubric-Driven Grading (Student)](#3-ai-rubric-driven-grading-student)
+4. [AI Rubric Management (Instructor)](#4-ai-rubric-management-instructor)
+5. [Common AI Configuration](#5-common-ai-configuration)
+
+---
+
+## 1. AI Chat & Research Assistant (RAG)
+
+The student's primary learning companion. It uses **Retrieval-Augmented Generation (RAG)** to answer questions based strictly on course materials (PDFs, PPTX, Transcripts).
+
+### Ask AI Assistant
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/student/chat/` |
+| **Method** | `POST` |
+| **Auth Required**| Yes (Student) |
+
+#### Request Body
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `content` | string | Yes | The user's question or instruction. |
+| `course_id` | int | No | Specify a course context (Default: First active enrollment). |
+| `conversation_id`| int | No | ID of an existing thread for context retention. |
+
+```json
+{
+    "content": "Explain the concept of backpropagation using the lecture notes.",
+    "course_id": 101
+}
+```
+
+#### Response (200 OK)
+```json
+{
+    "conversation_id": 45,
+    "ai_message": {
+        "content": "Backpropagation is the central mechanism by which neural networks learn...",
+        "sources_used": [
+            {"title": "Lecture 5: Deep Learning", "page": 12},
+            {"title": "ML_Basics.pdf", "page": 4}
+        ],
+        "was_from_rag": true
     }
-    ```
-*   **Response**: Returns `access` and `refresh` tokens + user profile data.
-
-### 2. Token Refresh
-*   **Endpoint**: `POST /api/token/refresh/`
-*   **Request Body**: `{"refresh": "<refresh_token>"}`
+}
+```
 
 ---
 
-## 👨‍🎓 Student APIs
-Base Path: `/api/student/`
+## 2. AI Presentation Generator
 
-### 1. Dashboard
-*   **Endpoint**: `GET /dashboard/`
-*   **Returns**: Active courses, recent announcements, and pending assignments.
+Integrated directly into the Chat Assistant. Users can trigger this using keywords like *"make a presentation"*, *"create slides"*, or *"PowerPoint"*.
 
-### 2. Course Materials
-*   **Endpoint**: `GET /courses/<course_id>/`
-*   **Returns**: All files (PDF, PPTX) uploaded for this course.
-*   **Download**: `GET /materials/<material_id>/download/`
+### Flow & Interactive Logic
+1. **Trigger**: User asks for a presentation in `/api/student/chat/`.
+2. **Blueprint Phase**: AI generates a Markdown outline (Blueprint).
+3. **Refinement**: User can give feedback ("Add more about X", "Remove slide 3").
+4. **Final Generation**: Once approved, AI generates a `.pptx` file.
 
-### 3. AI Chatbot (The Core Feature)
-*   **Endpoint**: `POST /chat/`
-*   **Request Body**:
-    ```json
-    {
-      "content": "What are the main topics in this course?",
-      "course_id": 5,
-      "conversation_id": null 
+#### Response (with Presentation Path)
+When a presentation is finalized, the chat response includes:
+```json
+{
+    "answer": "I have generated the final presentation. You can find it here: presentations/gen_123.pptx",
+    "presentation_path": "presentations/gen_123.pptx"
+}
+```
+
+---
+
+## 3. AI Rubric-Driven Grading (Student)
+
+Allows students to submit text or code for immediate, structured evaluation against a TA-defined rubric.
+
+### Submit for Auto-Grading
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/student/rubric-submit/` |
+| **Method** | `POST` |
+
+#### Request Body
+```json
+{
+    "assignment_id": 12,
+    "submitted_text": "Insert assignment content here..."
+}
+```
+
+#### Response (201 Created)
+Returns the `grading_result` object nested in the submission.
+```json
+{
+    "submission": {
+        "id": 88,
+        "status": "GRADED",
+        "grading_result": {
+            "total_score": 18.5,
+            "max_score": 20.0,
+            "percentage": 92.5,
+            "criteria_breakdown": [
+                {
+                    "criteria_name": "Critical Analysis",
+                    "points_awarded": 9.5,
+                    "max_points": 10.0,
+                    "justification": "Detailed analysis provided, but missed the final inference."
+                }
+            ],
+            "feedback_summary": "Excellent work. Your structure is professional."
+        }
     }
-    ```
-*   **AI Smart Features**:
-    *   **YouTube Support**: Include a URL in `content` to chat with the video.
-    *   **Cumulative Access**: Students can ask about past (Completed) courses.
-    *   **Context Memory**: Send a `conversation_id` to continue a previous chat.
+}
+```
 
 ---
 
-## 👨‍🏫 Instructor (Professor/TA) APIs
-Base Path: `/api/professor/` (or `/api/ta/`)
+## 4. AI Rubric Management (Instructor)
 
-### 1. Upload Material (with AI Ingestion)
-*   **Endpoint**: `POST /materials/`
-*   **Format**: `multipart/form-data`
-*   **Fields**: `file`, `title`, `course_offering`, `material_type`.
-*   **AI Hook**: The system automatically chunks and indexes the file into the Vector DB immediately after upload.
+Used by Professors/TAs to configure how the AI should grade.
 
-### 2. Grading
-*   **Endpoint**: `POST /submissions/<id>/grade/`
-*   **Request Body**: `{"grade": 95, "feedback": "Great work!"}`
+### Create AI-Graded Assignment
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/professor/rubric-assignments/` |
+| **Method** | `POST` |
 
----
+#### Request Body (Rubric Schema)
+| Field | Description |
+|-------|-------------|
+| `grading_type`| `SUBJECTIVE` (Text/Essay) or `OBJECTIVE` (Code/Execution) |
+| `rubric` | Array of `{criteria_name, max_points, description}` |
+| `model_answer_text`| The ground truth the AI uses for comparison. |
 
-## 🛠️ Administrator APIs
-Base Path: `/admin/`
-Provides full CRUD (Create, Read, Update, Delete) via the Django Rest Framework router for:
-*   `/users/`: Manage Students and Professors.
-*   `/courses/`: Create and edit course descriptions.
-*   `/departments/`: Manage faculty structures.
+```json
+{
+    "title": "Weekly Essay 1",
+    "grading_type": "SUBJECTIVE",
+    "rubric": [
+        {"criteria_name": "Clarity", "max_points": 5, "description": "Writing flow"}
+    ],
+    "model_answer_text": "The ideal response should mention..."
+}
+```
 
----
+### Trigger AI Re-grading
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/professor/submissions/{id}/regrade/` |
+| **Method** | `POST` |
 
-## 🧠 AI RAG Engine Specifications
-
-### 1. Data Filtering (Security)
-The AI does NOT search the whole database. It uses a **Pre-authorized Access List** calculated by the backend:
-*   **Current Course**: `ACTIVE` status.
-*   **Prerequisites**: `COMPLETED` status.
-*   The LLM only sees documents matching these IDs.
-
-### 2. YouTube Processing Pipeline
-1.  **Stage 1 (API)**: Attempts to fetch official or auto-generated transcripts.
-2.  **Stage 2 (Whisper)**: If subtitles are disabled, the AI "listens" to the audio and transcribes it on the GPU.
-3.  **Caching**: Transcripts are saved in `ai_engine/data/transcript_cache/` for instant re-use.
-
-### 3. Context Window Management
-For very long lectures (>1 hour), the system automatically truncates the transcript to **8,000 tokens** to prevent API crashes and optimize costs/speed.
+Force the AI to re-evaluate a submission (e.g., after updating the rubric).
 
 ---
 
-## 🚀 Deployment Notes
-*   **GPU Requirement**: The server MUST have an NVIDIA GPU with `CUDA 12.1` for optimal performance.
-*   **DB**: MySQL/MariaDB.
-*   **Environment Variables**: Ensure `GROQ_API_KEY` and `EMBEDDING_DEVICE='cuda'` are set in `.env`.
+## 5. Common AI Configuration
+
+### Model Details
+* **Engine**: Llama 3.3 70B (Versatile) via Groq Cloud.
+* **Temperature**: `0.1` (Low for consistent, objective results).
+* **Max Tokens**: `2048` per evaluation.
+
+### Prompt Security
+* **Isolation**: User inputs are sanitized and wrapped in XML tags (`<student_submission>`) to prevent system instruction overrides (Prompt Injection).
+* **Citations**: Source metadata is extracted via Vector Search (FAISS/ChromaDB) before being passed to the LLM.
