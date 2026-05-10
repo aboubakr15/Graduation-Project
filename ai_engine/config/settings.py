@@ -18,8 +18,8 @@ PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 RAW_DATA_DIR.mkdir(parents=True, exist_ok=True) # هيعمل فولدر raw لو ملقاهوش
 
 # ── Vector store settings ──────────────────────────────────────────────────────
-CHROMA_DB_DIR = str(PROCESSED_DATA_DIR / "chroma_db")
-COLLECTION_NAME = "course_materials"
+# Using Cloud Qdrant (Credentials in environment variables QDRANT_URL, QDRANT_API_KEY)
+COLLECTION_NAME = "college_courses"
 
 CHUNKS_CACHE_PATH = str(PROCESSED_DATA_DIR / "processed_chunks.jsonl")
 

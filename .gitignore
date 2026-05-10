@@ -1,6 +1,7 @@
 # Environment
 env/
 venv/
+test_env/
 .env
 
 # Python

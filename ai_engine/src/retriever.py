@@ -121,7 +121,15 @@ class Retriever:
             # Clean course codes for metadata matching
             clean_codes = [c.upper().strip() for c in user_courses if c.strip()]
             if clean_codes:
-                where_filter = {"course_code": {"$in": clean_codes}}
+                from qdrant_client.http import models
+                where_filter = models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="metadata.course_code",
+                            match=models.MatchAny(any=clean_codes)
+                        )
+                    ]
+                )
                 logger.info(f"Applying course_code filter: {clean_codes}")
 
         dense_results: List[Tuple[Document, float]] = (

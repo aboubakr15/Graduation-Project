@@ -342,7 +342,7 @@ class AutoCorrectionResult(models.Model):
 
 class ChatConversation(models.Model):
     student = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_conversations', limit_choices_to={'primary_role': User.Role.STUDENT})
-    course_offering = models.ForeignKey(CourseOffering, on_delete=models.CASCADE, related_name='chat_conversations')
+    course_offering = models.ForeignKey(CourseOffering, on_delete=models.CASCADE, related_name='chat_conversations', null=True, blank=True)
     title = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

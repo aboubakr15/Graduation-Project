@@ -1,7 +1,7 @@
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Callable, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 from io import BytesIO
 import logging
 import os
@@ -234,16 +234,32 @@ class DocumentProcessor:
 
         all_documents = []
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # We use a dictionary to track futures
             future_to_path = {executor.submit(self.load_document, str(fp)): fp for fp in supported_files}
+            
             for future in as_completed(future_to_path):
+                fp = future_to_path[future]
                 try:
-                    all_documents.extend(future.result())
-                except Exception:
-                    pass
+                    # If a single file takes more than 30 seconds to load, it's likely corrupt or too complex
+                    result = future.result(timeout=30) 
+                    if result:
+                        all_documents.extend(result)
+                except TimeoutError:
+                    print(f"  🛑 Timeout: Skipping {fp.name} (Taking too long to process)")
+                except Exception as e:
+                    print(f"  ❌ Error: Could not load {fp.name}: {e}")
+                    
         return all_documents
 
     def load_document(self, file_path: str) -> List[Document]:
         path = Path(file_path)
+
+        # Safety Check: Skip massive text files that cause hangs
+        if path.suffix.lower() == ".txt" and path.stat().st_size > 10 * 1024 * 1024:
+            print(f"  ⚠️ Skipping {path.name} (File too large: {path.stat().st_size // 1024 // 1024}MB)")
+            return []
+
+        print(f"  📄 Loading: {path.name}...")
         extension = path.suffix.lower()
         if extension not in self.loader_mapping: return []
 

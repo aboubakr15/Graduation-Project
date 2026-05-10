@@ -2,7 +2,7 @@ from typing import Dict, List
 from pathlib import Path
 from langchain_core.documents import Document
 from src.document_processor import DocumentProcessor
-from src.vector_store import VectorStoreManager, VectorStoreNotFoundError
+from src.vector_store import VectorStoreManager, VectorStoreError
 from src.retriever import Retriever
 from src.generator import Generator
 from src.youtube_processor import YouTubeProcessor
@@ -104,7 +104,7 @@ class RAGPipeline:
             try:
                 self.vector_store_manager.load_vector_store()
                 self.is_initialized = True
-            except VectorStoreNotFoundError as e:
+            except VectorStoreError as e:
                 logger.error(f"Failed to load vector store: {e}")
                 return {"answer": "Vector store not found. Please run initialization first.", "sources": []}
 

@@ -2,142 +2,145 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import threading
 from typing import List, Optional
 
+from qdrant_client import QdrantClient
+from langchain_qdrant import QdrantVectorStore
 from langchain_core.documents import Document
-from langchain_community.vectorstores import Chroma
 
 from src.embeddings import EmbeddingManager
-from config.settings import CHROMA_DB_DIR, COLLECTION_NAME , _ADD_BATCH_SIZE
+from config.settings import COLLECTION_NAME, _ADD_BATCH_SIZE
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
-
 
 
 class VectorStoreError(Exception):
     """Base exception for VectorStoreManager failures."""
 
 
-class VectorStoreNotFoundError(VectorStoreError):
-    """Raised when load_vector_store is called but no persisted store exists."""
-
-
 class VectorStoreManager:
     
     def __init__(
         self,
-        persist_directory: str = CHROMA_DB_DIR,
         collection_name: str = COLLECTION_NAME,
     ) -> None:
-        self.persist_directory = persist_directory
         self.collection_name = collection_name
         self.embedding_manager = EmbeddingManager()
 
-        self._vector_store: Optional[Chroma] = None
-        self._lock = threading.Lock()
+        self._vector_store: Optional[QdrantVectorStore] = None
+        self._client: Optional[QdrantClient] = None
+        self._lock = threading.RLock()
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    def _get_client(self) -> QdrantClient:
+        if self._client is not None:
+            return self._client
+        
+        url = os.getenv("QDRANT_URL")
+        api_key = os.getenv("QDRANT_API_KEY")
+        
+        if not url or not api_key:
+            logger.error("QDRANT_URL or QDRANT_API_KEY not found in environment variables.")
+            raise VectorStoreError("Qdrant credentials missing.")
+
+        logger.info(f"Connecting to Qdrant cloud at {url}")
+        self._client = QdrantClient(url=url, api_key=api_key, timeout=60)
+        return self._client
 
     def create_vector_store(
         self,
         documents: List[Document],
         overwrite: bool = False,
-    ) -> Chroma:
+    ) -> QdrantVectorStore:
         
         if not documents:
             raise ValueError("Cannot create a vector store from an empty document list.")
 
-        if os.path.exists(self.persist_directory):
-            if not overwrite:
-                raise VectorStoreError(
-                    f"A vector store already exists at '{self.persist_directory}'. "
-                    "Pass overwrite=True to replace it."
-                )
-            self._remove_persist_directory()
+        client = self._get_client()
+        
+        if overwrite:
+            logger.info(f"Overwriting collection '{self.collection_name}' in Qdrant.")
+            try:
+                client.delete_collection(self.collection_name)
+            except Exception as e:
+                logger.warning(f"Could not delete collection (it might not exist): {e}")
 
-        logger.info(
-            f"Creating vector store with {len(documents)} document(s) "
-            f"at '{self.persist_directory}' …"
-        )
+        # Ensure collection exists before initializing QdrantVectorStore
+        from qdrant_client.http import models
+        try:
+            client.get_collection(self.collection_name)
+        except Exception:
+            logger.info(f"Creating collection '{self.collection_name}' with 384 dimensions...")
+            client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE),
+            )
+
+        logger.info(f"Initializing QdrantVectorStore for collection '{self.collection_name}'...")
         embeddings = self.embedding_manager.get_embeddings()
 
         with self._lock:
-            self._vector_store = Chroma.from_documents(
-                documents=documents,
-                embedding=embeddings,
-                persist_directory=self.persist_directory,
+            self._vector_store = QdrantVectorStore(
+                client=client,
                 collection_name=self.collection_name,
+                embedding=embeddings,
             )
+            # Add documents separately
+            self._vector_store.add_documents(documents)
 
-        count = self._safe_count()
-        logger.info(
-            f"Vector store created: {count} document(s) persisted "
-            f"to '{self.persist_directory}'."
-        )
+        logger.info(f"Vector store created and documents persisted to Qdrant.")
         return self._vector_store
 
-    def load_vector_store(self) -> Chroma:
-        
-        if not os.path.exists(self.persist_directory) or not os.listdir(
-            self.persist_directory
-        ):
-            raise VectorStoreNotFoundError(
-                f"No vector store found at '{self.persist_directory}'. "
-                "Run create_vector_store() first."
-            )
-
-        logger.info(f"Loading vector store from '{self.persist_directory}' …")
+    def load_vector_store(self) -> QdrantVectorStore:
+        logger.info(f"Loading Qdrant vector store collection '{self.collection_name}' ...")
         embeddings = self.embedding_manager.get_embeddings()
+        client = self._get_client()
 
         with self._lock:
-            self._vector_store = Chroma(
-                persist_directory=self.persist_directory,
-                embedding_function=embeddings,
+            self._vector_store = QdrantVectorStore(
+                client=client,
                 collection_name=self.collection_name,
+                embedding=embeddings,
             )
 
-        count = self._safe_count()
-        logger.info(f"Vector store loaded: {count} document(s) in collection.")
+        logger.info(f"Qdrant vector store collection '{self.collection_name}' loaded.")
         return self._vector_store
 
     def add_documents(self, documents: List[Document]) -> None:
-        
         if not documents:
             logger.warning("add_documents called with an empty list; nothing to do.")
             return
 
         store = self.get_vector_store()
         total = len(documents)
-        logger.info(f"Adding {total} document(s) in batches of {_ADD_BATCH_SIZE} …")
-
-        for start in range(0, total, _ADD_BATCH_SIZE):
-            batch = documents[start : start + _ADD_BATCH_SIZE]
-            try:
-                store.add_documents(batch)
-                logger.debug(
-                    f"Batch {start // _ADD_BATCH_SIZE + 1}: "
-                    f"added documents {start + 1}–{start + len(batch)} of {total}."
-                )
-            except Exception as exc:
-                raise VectorStoreError(
-                    f"Failed to add batch starting at index {start}: {exc}"
-                ) from exc
-
-        logger.info(f"Successfully added {total} document(s) to the vector store.")
-
-    def get_vector_store(self) -> Chroma:
+        batch_size = 50  # Upload 50 chunks at a time for better stability
         
+        logger.info(f"Adding {total} document(s) to Qdrant in batches of {batch_size}...")
+
+        try:
+            for i in range(0, total, batch_size):
+                batch = documents[i : i + batch_size]
+                
+                print(f"  🧠 Step 1: Generating embeddings for batch {i//batch_size + 1} on GPU...")
+                # store.add_documents triggers the embedding model
+                store.add_documents(batch)
+                
+                progress = min(i + batch_size, total)
+                print(f"  🌐 Step 2: Batch {i//batch_size + 1} uploaded to Cloud! ({progress}/{total})")
+                logger.info(f"Uploaded batch {i//batch_size + 1}: {progress}/{total}")
+                
+        except Exception as exc:
+            print(f"❌ FATAL ERROR during upload: {exc}")
+            raise VectorStoreError(f"Failed to add documents to Qdrant: {exc}") from exc
+
+        logger.info(f"Successfully added {total} document(s) to Qdrant.")
+
+    def get_vector_store(self) -> QdrantVectorStore:
         if self._vector_store is not None:
             return self._vector_store
 
         with self._lock:
-            # Double-checked locking: another thread may have loaded the
-            # store while we were waiting.
             if self._vector_store is None:
                 self.load_vector_store()
 
@@ -146,44 +149,48 @@ class VectorStoreManager:
     def get_all_sources(self) -> set:
         """Returns a set of all unique 'source' paths currently in the vector store."""
         try:
-            store = self.get_vector_store()
-            # Chroma allows fetching metadata. We fetch all and extract 'source'.
-            results = store.get(include=['metadatas'])
-            metadatas = results.get('metadatas', [])
-            return {m.get('source') for m in metadatas if m and 'source' in m}
+            client = self._get_client()
+            sources = set()
+            
+            offset = None
+            while True:
+                response = client.scroll(
+                    collection_name=self.collection_name,
+                    with_payload=True,
+                    with_vectors=False,
+                    limit=100,
+                    offset=offset
+                )
+                points, next_page_offset = response
+                for p in points:
+                    if p.payload and 'metadata' in p.payload:
+                         meta = p.payload['metadata']
+                         if 'source' in meta:
+                             sources.add(meta['source'])
+                    elif p.payload and 'source' in p.payload:
+                         sources.add(p.payload['source'])
+                
+                if next_page_offset is None:
+                    break
+                offset = next_page_offset
+                
+            return sources
         except Exception as e:
-            logger.warning(f"Could not retrieve existing sources: {e}")
+            logger.warning(f"Could not retrieve existing sources from Qdrant: {e}")
             return set()
 
     def store_exists(self) -> bool:
-        """Return ``True`` if a persisted vector store exists on disk."""
-        return bool(
-            os.path.exists(self.persist_directory)
-            and os.listdir(self.persist_directory)
-        )
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _remove_persist_directory(self) -> None:
-        """Delete the persist directory, raising VectorStoreError on failure."""
+        """Return ``True`` if the collection exists in Qdrant."""
         try:
-            shutil.rmtree(self.persist_directory)
-            self._vector_store = None
-            logger.info(f"Removed existing vector store at '{self.persist_directory}'.")
-        except OSError as exc:
-            raise VectorStoreError(
-                f"Could not remove existing vector store at "
-                f"'{self.persist_directory}': {exc}"
-            ) from exc
+            client = self._get_client()
+            collections = client.get_collections().collections
+            return any(c.name == self.collection_name for c in collections)
+        except Exception:
+            return False
 
     def _safe_count(self) -> int:
-        
         try:
-            if self._vector_store is None:
-                return 0
-            return self._vector_store._collection.count()  # type: ignore[union-attr]
-        except Exception as exc:
-            logger.debug(f"Could not retrieve document count: {exc}")
+            client = self._get_client()
+            return client.get_collection(self.collection_name).vectors_count
+        except Exception:
             return 0
