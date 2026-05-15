@@ -80,6 +80,9 @@ class VectorStoreManager:
         logger.info(f"Initializing QdrantVectorStore for collection '{self.collection_name}'...")
         embeddings = self.embedding_manager.get_embeddings()
 
+        # Ensure required payload indexes exist before any filtered search
+        self._ensure_payload_indexes(client)
+
         with self._lock:
             self._vector_store = QdrantVectorStore(
                 client=client,
@@ -92,10 +95,44 @@ class VectorStoreManager:
         logger.info(f"Vector store created and documents persisted to Qdrant.")
         return self._vector_store
 
+    def _ensure_payload_indexes(self, client: "QdrantClient") -> None:
+        """Idempotently create the payload indexes required for filtered search.
+
+        Qdrant requires a keyword index on every field used in a 'match' filter.
+        Without it the search returns 400 Bad Request.
+        This method is safe to call multiple times — it silently ignores
+        'already exists' errors from Qdrant.
+        """
+        from qdrant_client.http import models
+
+        required_keyword_fields = [
+            "metadata.course_code",
+        ]
+
+        for field in required_keyword_fields:
+            try:
+                client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name=field,
+                    field_schema=models.PayloadSchemaType.KEYWORD,
+                )
+                logger.info(f"Payload index ensured for field '{field}'.")
+            except Exception as e:
+                err_lower = str(e).lower()
+                if "already exists" in err_lower or "conflict" in err_lower:
+                    logger.debug(f"Payload index for '{field}' already exists — skipping.")
+                else:
+                    logger.warning(
+                        f"Could not create payload index for '{field}': {e}"
+                    )
+
     def load_vector_store(self) -> QdrantVectorStore:
         logger.info(f"Loading Qdrant vector store collection '{self.collection_name}' ...")
         embeddings = self.embedding_manager.get_embeddings()
         client = self._get_client()
+
+        # Ensure required payload indexes exist before any filtered search
+        self._ensure_payload_indexes(client)
 
         with self._lock:
             self._vector_store = QdrantVectorStore(

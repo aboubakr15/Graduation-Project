@@ -34,8 +34,8 @@ ENABLE_OCR = True
 OCR_SPARSE_TEXT_THRESHOLD = 100
 _MAX_LOADER_WORKERS = 4
 # ── Retrieval settings ─────────────────────────────────────────────────────────
-TOP_K_RESULTS = 4
-SIMILARITY_THRESHOLD = 0.45
+TOP_K_RESULTS = 10
+SIMILARITY_THRESHOLD = 0.25
 _ADD_BATCH_SIZE = 200
 
 # ── LLM settings — Groq API ───────────────────────────────────────────────────

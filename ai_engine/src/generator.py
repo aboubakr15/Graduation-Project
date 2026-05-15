@@ -482,23 +482,33 @@ Latest question:"""
         has_arabic = any("\u0600" <= ch <= "\u06FF" for ch in question)
         
         if has_arabic:
-            prompt = f"""أنت مساعد ذكي. انظر إلى سؤال الطالب والمحتوى المسترجع.
-هل المحتوى يحتوي على معلومات كافية ومباشرة للإجابة على السؤال؟
-إذا كان المحتوى يتحدث عن شيء آخر تماماً أو غير كاف، أجب بـ "No".
-إذا كان المحتوى يحتوي على الإجابة أو جزء رئيسي منها، أجب بـ "Yes".
+            prompt = f"""أنت مساعد أكاديمي. انظر إلى سؤال الطالب والمحتوى المستخرج من المحاضرات.
+هل المحتوى يحتوي على أي معلومات متعلقة بموضوع السؤال؟
+إذا كان المحتوى يتحدث عن موضوع مختلف تماماً ولا علاقة له بالسؤال، أجب بـ "No".
+إذا كان المحتوى يحتوي على الإجابة، أو جزء منها، أو حتى مفاهيم متعلقة تساعد في الشرح، أجب بـ "Yes".
 أجب بكلمة واحدة فقط: Yes أو No.
-
+ 
 السؤال: {question}
-المحتوى: {context[:1500]}"""
+المحتوى: {context[:2000]}"""
         else:
-            prompt = f"""You are an intelligent assistant. Look at the user's question and the retrieved document.
-Does this document actually contain the specific answer to the question?
-If the document is about something else entirely or lacks the answer, output "No".
-If it contains the answer or a major part of it, output "Yes".
+            prompt = f"""You are an academic assistant. Look at the student's question and the retrieved lecture content.
+Does this content contain ANY information related to the topic of the question?
+If the content is completely irrelevant or about a different subject, output "No".
+If it contains the answer, a partial answer, or relevant concepts that help explain the topic, output "Yes".
 Output EXACTLY one word: Yes or No.
 
 Question: {question}
-Context: {context[:1500]}"""
+Context: {context[:2000]}"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model, messages=[{"role": "user", "content": prompt}], max_tokens=5, temperature=0.0
+            )
+            answer = response.choices[0].message.content.strip()
+            return "Yes" if "yes" in answer.lower() else "No"
+        except Exception as e:
+            logger.error(f"Evaluation failed: {e}")
+            return "No"
 
         try:
             response = self.client.chat.completions.create(

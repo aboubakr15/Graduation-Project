@@ -23,8 +23,8 @@ from main.models import (
     StudentSubmission, Notification, Assignment, Announcement, CourseMaterial
 )
 from grading.models import GradingResult
-import mimetypes
-import os
+
+logger = logging.getLogger(__name__)
 
 class StudentDashboardView(APIView):
     permission_classes = [IsAuthenticated]
@@ -196,21 +196,40 @@ class StudentChatBotView(APIView):
         # Execute AI Query
         selected_course = course_offering.course.code if course_offering else None
         
-        # Build list of ALL enrolled course codes for the student (Current + Completed)
-        enrolled_course_codes = list(
-            Enrollment.objects.filter(
-                student=request.user,
-                status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED],
-            ).select_related('course_offering__course')
-            .values_list('course_offering__course__code', flat=True)
-        )
+        # Build list of ALL enrolled course identifiers (Codes + Names)
+        # This handles cases where Qdrant might be indexed by folder names instead of codes
+        enrollments = Enrollment.objects.filter(
+            student=request.user,
+            status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED],
+        ).select_related('course_offering__course')
         
+        # Build list of enrolled course identifiers (Codes + Names + Prefixes)
+        # If a specific course is selected, we only use its identifiers for strictness
+        filter_enrollments = enrollments
+        if course_offering:
+            filter_enrollments = enrollments.filter(course_offering=course_offering)
+            
+        enrolled_course_codes = []
+        for e in filter_enrollments:
+            code = e.course_offering.course.code
+            name = e.course_offering.course.name
+            enrolled_course_codes.append(code)
+            enrolled_course_codes.append(name)
+            
+            # Add prefix (e.g., 'AI 330' -> 'AI')
+            if ' ' in code:
+                enrolled_course_codes.append(code.split(' ')[0])
+            
+            match = re.match(r'^([a-zA-Z]+)', code)
+            if match:
+                enrolled_course_codes.append(match.group(1))
+            
         try:
             rag = get_rag_pipeline()
             ai_result = rag.query(
                 question=content,
                 history=history,
-                selected_course=selected_course,
+                selected_course=None, # We handle filtering via user_courses list for better matching
                 user_courses=enrolled_course_codes
             )
             ai_response_content = ai_result.get("answer", "I'm sorry, I couldn't process that.")
@@ -405,7 +424,7 @@ from grading.serializers import (
 )
 
 import logging
-logger_grading = logging.getLogger(__name__)
+logger_grading = logging.getLogger("grading")
 
 
 class StudentRubricSubmitView(APIView):

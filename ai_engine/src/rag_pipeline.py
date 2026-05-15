@@ -218,14 +218,51 @@ class RAGPipeline:
         # 2. Smart Filtering Logic (Using Course Codes)
         # -----------------------------------------------------------------
         active_filter = None
+        is_student_mode = user_courses is not None
+        
         if selected_course:
-            logger.info(f"UI Filter ON: Searching ONLY in course code '{selected_course}'")
+            logger.info(f"UI Filter ON: Searching in expanded course context for '{selected_course}'")
+            # Filter the user_courses to ONLY include labels for the selected course
+            # This ensures a student can't select Course A but get answers from Course B
             active_filter = [selected_course.upper().strip()]
-        elif user_courses:
-            logger.info(f"UI Filter OFF: Searching in ALL enrolled course codes: {user_courses}")
-            active_filter = [c.upper().strip() for c in user_courses]
+            if ' ' in selected_course:
+                active_filter.append(selected_course.split(' ')[0].upper().strip())
+            
+            import re
+            match = re.match(r'^([a-zA-Z]+)', selected_course)
+            if match:
+                active_filter.append(match.group(1).upper())
+                
+            if user_courses:
+                # Find all identifiers in the user's allowed list that are related 
+                # to the selected course (either matching the code or the name)
+                allowed_labels = [c.upper().strip() for c in user_courses]
+                
+                # We take any allowed label that:
+                # 1. Matches our current active list (Code/Prefix)
+                # 2. Or is clearly related to the selected course string
+                active_filter = [
+                    c for c in allowed_labels 
+                    if c in active_filter 
+                    or selected_course.upper() in c 
+                    or c in selected_course.upper()
+                ]
+            elif is_student_mode:
+                # If in student mode but no courses allowed for this selection -> BLOCK
+                active_filter = ["FORCE_EMPTY_FILTER_NO_ACCESS"]
+
+            active_filter = list(set(active_filter))
+            logger.info(f"Final Active Filter: {active_filter}")
+
+        elif is_student_mode:
+            if user_courses:
+                logger.info(f"UI Filter OFF: Searching in ALL enrolled course codes: {user_courses}")
+                active_filter = [c.upper().strip() for c in user_courses]
+            else:
+                logger.warning("Student has NO enrollments. Blocking access to all documents.")
+                active_filter = ["FORCE_EMPTY_FILTER_NO_ACCESS"]
         else:
-            logger.info("No course codes provided. Searching globally.")
+            logger.info("No course codes provided (Global/Admin mode). Searching globally.")
         # -----------------------------------------------------------------
 
         # 3. Agent Retrieval (First Pass - Enrolled Courses)
@@ -243,6 +280,7 @@ class RAGPipeline:
                 clean_search_query = rewritten_query
                 
             logger.info(f"Cleaned Retrieval Query: {clean_search_query}")
+            # Increased k to 15 for better context on deep technical questions
             documents = self.retriever.retrieve(clean_search_query, user_courses=active_filter)
 
         # 4. Prepare YouTube Context if exists
