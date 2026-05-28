@@ -140,11 +140,7 @@ class YouTubeProcessor:
             
         except Exception as e:
             logger.info(f"Stage 1 FAILED for {video_id}: {e}")
-            
-            if TRANSCRIPTION_AVAILABLE:
-                # --- Stage 2: Whisper fallback (last resort) ---
-                logger.info(f"Stage 2: Attempting Whisper transcription for {video_id}...")
-                return self._transcribe_fallback(video_id)
+            # Whisper fallback disabled to prevent slow audio downloads
             return None
 
     def _group_segments(self, segments: List[Dict], interval_secs: int = 30) -> str:

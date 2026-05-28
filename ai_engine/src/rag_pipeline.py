@@ -202,7 +202,8 @@ class RAGPipeline:
         # -----------------------------------------------------------------
         if is_recommendation:
             logger.info("Recommendation intent detected...")
-            rec_query = rewritten_query
+            rec_query = self.generator.extract_recommendation_topic(rewritten_query)
+            logger.info(f"Extracted recommendation topic: {rec_query}")
             if (not rec_query or rec_query == "general") and video_meta and video_meta['title'] != "Unknown Title":
                 rec_query = video_meta['title']
             recommendation_data = self.recommender.get_all_recommendations(rec_query)
@@ -290,9 +291,11 @@ class RAGPipeline:
             raw_transcript = youtube_data.get("transcript")
             
             # Smart Truncation for long transcripts (staying under Groq limits)
-            if raw_transcript and len(raw_transcript) > 25000: # ~8000 tokens
-                logger.info("Transcript too long, truncating to 25000 characters...")
-                raw_transcript = raw_transcript[:25000] + "\n... [Transcript truncated for length] ..."
+            # Groq TPM limit is 12,000. System prompt + history uses ~4,000 tokens,
+            # so we cap the transcript at ~8,000 chars (~2,500 tokens) to be safe.
+            if raw_transcript and len(raw_transcript) > 8000:
+                logger.info("Transcript too long, truncating to 8000 characters...")
+                raw_transcript = raw_transcript[:8000] + "\n... [Transcript truncated for length] ..."
                 
             content = raw_transcript if raw_transcript and "[ERROR:" not in str(raw_transcript) else "[No Transcript Available]"
             context_parts.append("[SOURCE: YOUTUBE_VIDEO_TRANSCRIPT]\n" + meta_header + content)

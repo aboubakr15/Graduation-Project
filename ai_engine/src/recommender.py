@@ -48,7 +48,9 @@ class RecommendationEngine:
                     if len(recommendations) >= count:
                         break
                         
-                    logger.info(f"Manual YouTube search: {query}")
+                    # Safe log query to prevent UnicodeEncodeError on CP1252 Windows consoles
+                    safe_query = query.encode('ascii', errors='replace').decode('ascii') if isinstance(query, str) else query
+                    logger.info(f"Manual YouTube search: {safe_query}")
                     url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
                     
                     try:
@@ -94,12 +96,14 @@ class RecommendationEngine:
                                             except:
                                                 continue
                     except Exception as e:
-                        logger.warning(f"Failed query phase for '{query}': {e}")
+                        safe_query = query.encode('ascii', errors='replace').decode('ascii') if isinstance(query, str) else query
+                        logger.warning(f"Failed query phase for '{safe_query}': {e}")
                         continue
             
             return recommendations
         except Exception as e:
-            logger.error(f"Global error in YouTube search for topic '{topic}': {e}")
+            safe_topic = topic.encode('ascii', errors='replace').decode('ascii') if isinstance(topic, str) else topic
+            logger.error(f"Global error in YouTube search for topic '{safe_topic}': {e}")
             logger.error(traceback.format_exc())
             return []
 

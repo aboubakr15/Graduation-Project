@@ -31,3 +31,7 @@ ai_engine/config/__pycache__/
 .idea/
 *.swp
 *.swo
+
+# Generated Files
+presentations/
+ai_engine/data/transcript_cache/

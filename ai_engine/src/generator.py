@@ -336,7 +336,7 @@ JSON array:"""
 5. في حالة ملاحظة "[Transcription Blocked]" أو "[No Transcript Available]"، أخبر الطالب أنك لم تتمكن من قراءة التفاصيل واعرض المساعدة من مواد الكورس.
 6. في حالة الأسئلة التي تطلب "ترشيحات"، استخدم بيانات [RECOMMENDED_RESOURCES] فقط.
 7. لا تعرض الترشيحات إذا كان الطالب يطلب تلخيص الفيديو المقدم.
-8. ممنوع تماماً تقديم أي روابط بحث عامة أو روابط لمواقع أخرى.
+8. ممنوع تماماً تقديم أي روابط بحث عامة أو روابط لمواقع أخرى (ولكن يجب عليك كتابة وتضمين روابط اليوتيوب المحددة المذكورة في [RECOMMENDED_RESOURCES] كما هي مع الترشيحات).
 9. استخدم سجل المحادثة لفهم الأسئلة المتابعة.
 10. الإجابة يجب أن تكون منسقة ومنظمة (استخدم النقاط والعناوين الفرعية والكود عند الحاجة).
 11. إذا كانت قائمة الترشيحات فارغة، قل فقط: "عذراً، لم أجد روابط يوتيوب مناسبة حالياً."
@@ -357,7 +357,7 @@ STRICT RULES — YOU MUST FOLLOW THESE WITHOUT EXCEPTION:
 5. If you see "[Transcription Blocked]" or "[No Transcript Available]", inform the user and offer to help using course materials instead.
 6. If the student asks for "recommendations" or "resources", use ONLY the [RECOMMENDED_RESOURCES] section.
 7. NEVER show recommendations when the user asks to summarize the provided video.
-8. DO NOT provide general search links or links to other platforms.
+8. DO NOT provide general search links or links to other platforms (but you MUST include the specific YouTube links provided in [RECOMMENDED_RESOURCES] exactly as they are).
 9. Use conversation history to understand follow-up questions.
 10. Format all responses with markdown (bullet points, subheadings, code blocks where needed).
 11. If the recommendations list is empty, say: "I'm sorry, I couldn't find any specific YouTube recommendations for this topic at the moment."
@@ -580,3 +580,35 @@ After the disclaimer, provide a helpful, well-structured, and accurate answer.""
             return response.choices[0].message.content
         except Exception as e:
             return "Error: Failed to generate a general response."
+
+    def extract_recommendation_topic(self, question: str) -> str:
+        """Extract the core search topic from a recommendation query."""
+        if not USE_GROQ or not GROQ_AVAILABLE or not self.client:
+            return question
+            
+        prompt = f"""You are a search query optimizer. 
+Your task is to extract the core topic of interest from a user's recommendation query. 
+This core topic will be searched on YouTube, so it must be short (1-3 words) and clean.
+Do NOT include verbs like "recommend", "suggest", "find", "search", "ترشيح", "قترح", "ابحث".
+Do NOT output any markdown, punctuation, or extra text. Output ONLY the extracted topic.
+
+Examples:
+Query: "Can you suggest some other courses or videos about data science?" -> Data Science
+Query: "هل يمكنك ترشيح كورس آخر عن تعلم الآلة؟" -> تعلم الآلة
+Query: "suggest more resources on advanced neural networks" -> Advanced Neural Networks
+Query: "نرشح كورس برمجة بايثون" -> برمجة بايثون
+
+Query: "{question}"
+Optimized Topic:"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=20,
+                temperature=0.1,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Failed to extract recommendation topic: {e}")
+            return question
