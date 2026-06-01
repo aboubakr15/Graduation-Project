@@ -44,6 +44,7 @@ class CourseOfferingDetailSerializer(serializers.ModelSerializer):
     materials = serializers.SerializerMethodField()
     assignments = serializers.SerializerMethodField()
     enrolled_students = serializers.SerializerMethodField()
+    enrolled_count = serializers.SerializerMethodField()
     
     class Meta:
         model = CourseOffering

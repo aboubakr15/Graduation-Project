@@ -278,6 +278,102 @@ class StudentChatConversationDetailView(APIView):
         conversation.save()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+
+class StudentChatMessagesView(APIView):
+    """
+    GET /api/student/chat/messages/?conversation_id=<id>
+    Returns all messages in a conversation in chronological order.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        conversation_id = request.query_params.get('conversation_id')
+        if not conversation_id:
+            return Response(
+                {'error': 'conversation_id query parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        conversation = get_object_or_404(
+            ChatConversation, pk=conversation_id, student=request.user
+        )
+        messages = conversation.messages.all().order_by('timestamp')
+        return Response(ChatMessageSerializer(messages, many=True).data)
+
+
+class StudentConversationView(APIView):
+    """
+    GET  /api/student/conversations/        — list all non-archived conversations
+    POST /api/student/conversations/        — create a new empty conversation
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        conversations = ChatConversation.objects.filter(
+            student=request.user, is_archived=False
+        ).order_by('-updated_at')
+        return Response(ChatConversationSerializer(conversations, many=True).data)
+
+    def post(self, request):
+        title = request.data.get('title', 'New Conversation')
+        course_id = request.data.get('course_id')
+
+        course_offering = None
+        if course_id:
+            course_offering = get_object_or_404(CourseOffering, pk=course_id)
+
+        if not course_offering:
+            enrollment = Enrollment.objects.filter(
+                student=request.user, status=Enrollment.Status.ACTIVE
+            ).first()
+            course_offering = enrollment.course_offering if enrollment else None
+
+        conversation = ChatConversation.objects.create(
+            student=request.user,
+            course_offering=course_offering,
+            title=title[:100]
+        )
+        return Response(
+            ChatConversationSerializer(conversation).data,
+            status=status.HTTP_201_CREATED
+        )
+
+
+class StudentConversationDetailView(APIView):
+    """
+    GET    /api/student/conversations/<id>/  — get conversation + its messages
+    PATCH  /api/student/conversations/<id>/  — rename conversation title
+    DELETE /api/student/conversations/<id>/  — archive conversation
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        conversation = get_object_or_404(ChatConversation, pk=pk, student=request.user)
+        messages = conversation.messages.all().order_by('timestamp')
+        data = ChatConversationSerializer(conversation).data
+        data['messages'] = ChatMessageSerializer(messages, many=True).data
+        return Response(data)
+
+    def patch(self, request, pk):
+        conversation = get_object_or_404(ChatConversation, pk=pk, student=request.user)
+        title = request.data.get('title')
+        if not title:
+            return Response(
+                {'error': 'title is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        conversation.title = title[:100]
+        conversation.save()
+        return Response(ChatConversationSerializer(conversation).data)
+
+    def delete(self, request, pk):
+        conversation = get_object_or_404(ChatConversation, pk=pk, student=request.user)
+        conversation.is_archived = True
+        conversation.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+
+
 class StudentEnrollmentView(APIView):
     permission_classes = [IsAuthenticated]
 

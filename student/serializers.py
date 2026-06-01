@@ -160,21 +160,33 @@ class ToDoItemSerializer(serializers.ModelSerializer):
 class ChatMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatMessage
-        fields = ['id', 'role', 'content', 'timestamp', 'sources_used']
+        fields = ['id', 'role', 'content', 'timestamp', 'sources_used', 'was_from_rag']
 
 class ChatConversationSerializer(serializers.ModelSerializer):
-    course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
+    course_name = serializers.SerializerMethodField()
+    last_message_preview = serializers.SerializerMethodField()
+    # Keep backward-compat alias
     last_message = serializers.SerializerMethodField()
 
     class Meta:
         model = ChatConversation
-        fields = ['id', 'course_offering', 'course_name', 'title', 'created_at', 'updated_at', 'last_message']
+        fields = ['id', 'course_offering', 'course_name', 'title', 'created_at', 'updated_at',
+                  'last_message_preview', 'last_message']
 
-    def get_last_message(self, obj):
+    def get_course_name(self, obj):
+        if obj.course_offering and obj.course_offering.course:
+            return obj.course_offering.course.name
+        return None
+
+    def get_last_message_preview(self, obj):
         last_msg = obj.messages.all().order_by('-timestamp').first()
         if last_msg:
-            return last_msg.content[:50]
+            return last_msg.content[:100]
         return ""
+
+    def get_last_message(self, obj):
+        """Backward-compat alias for last_message_preview."""
+        return self.get_last_message_preview(obj)
 
 class EnrollmentSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course_offering.course.name', read_only=True)

@@ -8,6 +8,7 @@ from django.utils import timezone
 from django.db import transaction
 from datetime import timedelta
 import mimetypes
+import re
 
 from main.models import (
     User, CourseOffering, Enrollment, Assignment, CourseMaterial,
@@ -608,6 +609,212 @@ class ChatMessageListView(APIView):
         messages = conversation.messages.order_by('timestamp')
         serializer = ChatMessageSerializer(messages, many=True)
         return Response(serializer.data)
+
+
+class InstructorChatAIView(APIView):
+    """
+    POST /api/professor/chat/  — Professor sends a message to their own AI assistant.
+    GET  /api/professor/chat/  — (kept) List student conversations in instructor's courses.
+
+    For the GET, add ?mode=own to get the professor's own AI conversations instead.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        mode = request.query_params.get('mode', 'students')
+        if mode == 'own':
+            # Return the professor's own AI conversations
+            conversations = ChatConversation.objects.filter(
+                student=request.user, is_archived=False
+            ).order_by('-updated_at')
+        else:
+            # Legacy: return student conversations in professor's courses
+            courses = CourseOffering.objects.filter(
+                instructor=request.user
+            ) | CourseOffering.objects.filter(tas=request.user)
+            conversations = ChatConversation.objects.filter(
+                course_offering__in=courses.distinct()
+            ).select_related('student', 'course_offering__course')
+            conversations = conversations.order_by('-updated_at')
+        serializer = ChatConversationSerializer(conversations, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        """Professor sends a message to their own AI assistant."""
+        content = request.data.get('content')
+        course_id = request.data.get('course_id')
+        conversation_id = request.data.get('conversation_id')
+
+        if not content:
+            return Response(
+                {'error': 'content is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Resolve course offering
+        course_offering = None
+        if course_id:
+            course_offering = get_object_or_404(CourseOffering, pk=course_id)
+        else:
+            # Default to first course the instructor teaches
+            course_offering = CourseOffering.objects.filter(
+                instructor=request.user
+            ).first()
+
+        # Get or create conversation (professor is stored as 'student' on the model)
+        if conversation_id:
+            conversation = get_object_or_404(
+                ChatConversation, pk=conversation_id, student=request.user
+            )
+        else:
+            conversation = ChatConversation.objects.create(
+                student=request.user,
+                course_offering=course_offering,
+                title=content[:100]
+            )
+
+        # Build conversation history for context
+        history_msgs = conversation.messages.all().order_by('-timestamp')[:10]
+        history = []
+        for m in reversed(history_msgs):
+            role = 'user' if m.role == ChatMessage.Role.USER else 'assistant'
+            history.append({'role': role, 'content': m.content})
+
+        # Save user message
+        user_msg = ChatMessage.objects.create(
+            conversation=conversation,
+            role=ChatMessage.Role.USER,
+            content=content
+        )
+
+        # Build enrolled course filters (all courses instructor teaches)
+        taught_courses = CourseOffering.objects.filter(
+            instructor=request.user
+        ) | CourseOffering.objects.filter(tas=request.user)
+        taught_courses = taught_courses.distinct().select_related('course')
+
+        course_codes = []
+        for co in taught_courses:
+            code = co.course.code
+            name = co.course.name
+            course_codes.append(code)
+            course_codes.append(name)
+            if ' ' in code:
+                course_codes.append(code.split(' ')[0])
+            match = re.match(r'^([a-zA-Z]+)', code)
+            if match:
+                course_codes.append(match.group(1))
+
+        # Query the RAG engine
+        try:
+            from ai_engine.ai_services import get_rag_pipeline
+            rag = get_rag_pipeline()
+            ai_result = rag.query(
+                question=content,
+                history=history,
+                selected_course=None,
+                user_courses=course_codes if course_codes else None
+            )
+            ai_response_content = ai_result.get('answer', "I'm sorry, I couldn't process that.")
+            sources = ai_result.get('sources', [])
+        except Exception as e:
+            logger.error(f'Professor AI chat error: {e}')
+            ai_response_content = f'Error: {str(e)}'
+            sources = []
+
+        # Save AI response
+        ai_msg = ChatMessage.objects.create(
+            conversation=conversation,
+            role=ChatMessage.Role.ASSISTANT,
+            content=ai_response_content,
+            sources_used=sources,
+            was_from_rag=True
+        )
+
+        conversation.save()  # updates updated_at
+
+        return Response({
+            'conversation_id': conversation.id,
+            'user_message': ChatMessageSerializer(user_msg).data,
+            'ai_message': ChatMessageSerializer(ai_msg).data,
+        })
+
+
+class InstructorConversationListView(APIView):
+    """
+    GET  /api/professor/conversations/  — List professor's own AI conversations.
+    POST /api/professor/conversations/  — Create a new empty conversation.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        conversations = ChatConversation.objects.filter(
+            student=request.user, is_archived=False
+        ).order_by('-updated_at')
+        serializer = ChatConversationSerializer(conversations, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        title = request.data.get('title', 'New Conversation')
+        course_id = request.data.get('course_id')
+
+        course_offering = None
+        if course_id:
+            course_offering = get_object_or_404(CourseOffering, pk=course_id)
+        else:
+            course_offering = CourseOffering.objects.filter(
+                instructor=request.user
+            ).first()
+
+        conversation = ChatConversation.objects.create(
+            student=request.user,
+            course_offering=course_offering,
+            title=title[:100]
+        )
+        return Response(
+            ChatConversationSerializer(conversation).data,
+            status=status.HTTP_201_CREATED
+        )
+
+
+class InstructorConversationDetailView(APIView):
+    """
+    GET    /api/professor/conversations/<id>/  — Get conversation + messages.
+    PATCH  /api/professor/conversations/<id>/  — Rename title.
+    DELETE /api/professor/conversations/<id>/  — Archive conversation.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        conversation = get_object_or_404(
+            ChatConversation, pk=pk, student=request.user
+        )
+        messages = conversation.messages.all().order_by('timestamp')
+        data = ChatConversationSerializer(conversation).data
+        data['messages'] = ChatMessageSerializer(messages, many=True).data
+        return Response(data)
+
+    def patch(self, request, pk):
+        conversation = get_object_or_404(
+            ChatConversation, pk=pk, student=request.user
+        )
+        title = request.data.get('title')
+        if not title:
+            return Response(
+                {'error': 'title is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        conversation.title = title[:100]
+        conversation.save()
+        return Response(ChatConversationSerializer(conversation).data)
+
+    def delete(self, request, pk):
+        conversation = get_object_or_404(
+            ChatConversation, pk=pk, student=request.user
+        )
+        conversation.is_archived = True
+        conversation.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class NotificationListView(APIView):
