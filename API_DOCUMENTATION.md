@@ -57,6 +57,37 @@ The student's primary learning companion. It uses **Retrieval-Augmented Generati
 }
 ```
 
+### Get Conversation Messages
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/student/chat/messages/?conversation_id={id}` <br/> `/api/professor/chat/messages/?conversation_id={id}` |
+| **Method** | `GET` |
+
+### Conversation Management (Student & Professor)
+Both Students and Professors can manage their AI conversations using these RESTful endpoints.
+
+**Student Routes:** `/api/student/conversations/`  
+**Professor Routes:** `/api/professor/conversations/`
+
+| Method | Endpoint Details | Description |
+|--------|------------------|-------------|
+| `GET` | `/` | List all conversations for the user. |
+| `POST` | `/` | Create an empty conversation (requires `{ "title": "..." }`). |
+| `GET` | `/{id}/` | Get full conversation object with its messages. |
+| `PATCH` | `/{id}/` | Rename conversation (requires `{ "title": "..." }`). |
+| `DELETE` | `/{id}/` | Archive/Delete the conversation. |
+
+### Professor AI Assistant
+Professors have their own dedicated AI assistant that they can interact with.
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/professor/chat/` |
+| **Method** | `POST` |
+| **Request Body** | `{ "content": "..." }` (Same as student) |
+
+> **Note**: To monitor student conversations, professors use `GET /api/professor/chat/`. To fetch only their *own* AI conversations, they can use `GET /api/professor/chat/?mode=own` (or use the `/conversations/` routes).
+
 ---
 
 ## 2. AI Presentation Generator
