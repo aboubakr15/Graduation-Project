@@ -117,24 +117,53 @@ class Generator:
         # Fallback
         return f"Based on the course materials:\n\n{context[:800]}..."
 
-    def get_presentation_blueprint(self, content: str, user_request: str) -> str:
+    # ================================================================== #
+    # ★  MARKDOWN PRESENTATION ARCHITECT (replaces JSON-based flow)  ★
+    # ================================================================== #
+
+    def get_presentation_blueprint_md(self, content: str, user_request: str) -> str:
         """
-        Phase 1: The Blueprint (Mandatory)
-        Proposes a Slide-by-Slide Outline and asks for feedback.
+        Phase 1 — Blueprint (Markdown format).
+        Forces the LLM to output a Markdown outline using:
+          # Slide Title
+          - bullet
+        separated by <!-- slide --> HTML comments.
+        The user reviews this outline and approves/adjusts before Phase 2.
         """
         if not USE_GROQ or not GROQ_AVAILABLE or not self.client:
             return "Error: LLM not available for blueprint generation."
 
-        prompt = f"""Act as a Professional Presentation Architect. 
-Your Goal: Help the user create a high-impact presentation using the provided course content.
+        prompt = f"""You are a Professional Presentation Architect.
+Your ONLY job is to output a slide-by-slide OUTLINE for a presentation.
+If the user asks to change or adjust an existing outline, you MUST output the completely updated outline in the correct format. NEVER explain how to do it or talk to the user.
 
-PHASE 1: THE BLUEPRINT
-1. Analyze the provided content.
-2. Propose a Slide-by-Slide Outline. 
-3. Each slide must include a Title and a Brief Summary of Goal.
-4. Ask the user for feedback: "Does this flow work for you, or should we adjust the focus of any specific slide?"
+OUTPUT FORMAT — YOU MUST FOLLOW THIS EXACTLY:
+- Separate each slide with the HTML comment: <!-- slide -->
+- Each slide block starts with a Markdown heading: # Slide Title
+- Each slide block contains 1-3 SHORT bullet points (just the goal/topic, NOT full sentences).
+  Use a single dash: - bullet
+- The FIRST slide must always be a cover slide (title of the presentation + 1-line subtitle).
+- The LAST slide must always be a closing slide with title: # Thank You
+  and one bullet: - Questions & Discussion
+- ABSOLUTELY NO EXTRA TEXT. Do NOT converse, do NOT explain, do NOT say "Here is your updated outline". Output ONLY the slide blocks.
+- Do NOT wrap the output in ```markdown``` fences.
 
-STRICT CONSTRAINT: Never explain your internal logic. Simply guide the user through the Blueprint step.
+EXAMPLE OUTPUT (follow this structure exactly):
+# Introduction to Neural Networks
+- A beginner's guide to deep learning concepts
+
+<!-- slide -->
+
+# What is a Neural Network?
+- Inspired by the human brain
+- Layers of interconnected nodes
+
+<!-- slide -->
+
+# Thank You
+- Questions & Discussion
+
+NOW generate the blueprint for this request:
 
 [CONTENT]
 {content[:5000]}
@@ -142,7 +171,7 @@ STRICT CONSTRAINT: Never explain your internal logic. Simply guide the user thro
 [USER REQUEST]
 {user_request}
 
-Provide the Blueprint:"""
+Blueprint (Markdown only, no extra text):"""
 
         try:
             response = self.client.chat.completions.create(
@@ -151,71 +180,72 @@ Provide the Blueprint:"""
                 max_tokens=1500,
                 temperature=0.4,
             )
-            return response.choices[0].message.content
+            return response.choices[0].message.content.strip()
         except Exception as e:
-            logger.error(f"Blueprint generation failed: {e}")
+            logger.error(f"Blueprint (MD) generation failed: {e}")
             return "Error generating presentation blueprint."
 
-    def get_presentation_final_content(self, content: str, approved_outline: str) -> list:
+    def get_presentation_final_md(self, content: str, approved_blueprint: str) -> str:
         """
-        Phase 2: Content & Visual Design
-        Once the outline is approved, generate the final content for each slide.
+        Phase 2 — Full slide content (Markdown format).
+        Takes the approved Markdown blueprint and expands each slide into
+        complete educational bullet points, still using the same Markdown
+        # / - / <!-- slide --> format so the parser can build the PPTX.
         """
         if not USE_GROQ or not GROQ_AVAILABLE or not self.client:
-            return []
+            return ""
 
-        prompt = f"""Act as a Professional Presentation Architect and Creative Director.
-PHASE 2: CONTENT & VISUAL DESIGN
+        prompt = f"""You are a Professional Presentation Architect.
+Expand the approved outline below into a FULL slide deck with rich, educational content.
 
-STRICT CONSTRAINTS:
-1. Information Density: Use max 6 bullets per slide. Each bullet must be a FULL EDUCATIONAL SENTENCE (10-18 words), NOT a short phrase or heading.
-2. Content Quality: Every bullet must EXPLAIN something, not just name it.
-   - BAD:  "Represents program in memory"
-   - BAD:  "Contains 0's and 1's code"
-   - GOOD: "The text segment stores the compiled machine code (0s and 1s) of the program that the CPU executes."
-   - GOOD: "The stack segment dynamically allocates memory for local variables and manages return addresses of function calls."
-3. Tone Matching: Adapt the language to the audience (simplified for students, professional for teachers).
-4. The Creative Director Role: For EVERY slide, you must provide a Visual Instruction Block.
-5. STICK TO SOURCE: Use ONLY the provided [CONTENT SOURCE]. Do NOT invent or include external topics (e.g., Turning Test, history of AI) unless they are explicitly in the source text. Focus purely on the technical content provided.
-
-OUTPUT FORMAT:
-Return ONLY a valid JSON array of slide objects. Each object must include:
-- "type": "content"
-- "title": Slide title.
-- "content": List of bullets (max 6). Each bullet MUST be a complete educational sentence of 10-18 words.
-- "visual": {{ "concept": "...", "prompt": "..." }}
-- "notes": Speaker notes.
-
-Style Consistency: "Clean 3D Isometric".
+OUTPUT FORMAT — YOU MUST FOLLOW THIS EXACTLY:
+- Separate each slide with the HTML comment: <!-- slide -->
+- Each slide block starts with: # Slide Title
+- Each content slide has 4-6 bullets. Use: - bullet
+- Each bullet MUST be a COMPLETE EDUCATIONAL SENTENCE of 10-18 words that EXPLAINS a concept.
+  BAD:  "- Represents program in memory"
+  GOOD: "- The text segment stores the compiled machine code of the program that the CPU executes."
+- The FIRST slide (cover) keeps only the title and 1-line subtitle bullet.
+- The LAST slide (# Thank You) keeps only: - Questions & Discussion
+- STICK TO SOURCE: only use ideas from [CONTENT SOURCE]. Do NOT add external topics.
+- Do NOT add any extra text, explanations, headers, or code blocks outside the slide blocks.
+- Do NOT wrap the output in ```markdown``` fences.
 
 [CONTENT SOURCE]
 {content[:5000]}
 
 [APPROVED OUTLINE]
-{approved_outline}
+{approved_blueprint}
 
-JSON array:"""
+Full Markdown deck (no extra text):"""
 
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=2500,
+                max_tokens=3000,
                 temperature=0.3,
             )
-            raw = response.choices[0].message.content.strip()
-            slides = self._parse_json_array(raw)
-            return slides
+            return response.choices[0].message.content.strip()
         except Exception as e:
-            logger.error(f"Final content generation failed: {e}")
-            return []
+            logger.error(f"Final MD generation failed: {e}")
+            return ""
+
+    # ── Deprecated stubs kept for backward compatibility ───────────────
+
+    def get_presentation_blueprint(self, content: str, user_request: str) -> str:
+        """Deprecated: use get_presentation_blueprint_md() instead."""
+        return self.get_presentation_blueprint_md(content, user_request)
+
+    def get_presentation_final_content(self, content: str, approved_outline: str) -> list:
+        """Deprecated: returns empty list — use get_presentation_final_md() instead."""
+        logger.warning("get_presentation_final_content() is deprecated. Use get_presentation_final_md().")
+        return []
 
     def get_presentation_structure(self, content: str, title: str = "Presentation") -> list:
-        """
-        Backward compatible method - now uses high-impact standards.
-        """
-        # For a single-step 'fast track', we still use a professional prompt
-        return self.get_presentation_final_content(content, f"Slide 1: {title} Overview")
+        """Deprecated: returns empty list — use the Markdown flow instead."""
+        logger.warning("get_presentation_structure() is deprecated. Use the Markdown flow.")
+        return []
 
     # ──────────────────────────────────────────────────────────────────
     # Private helpers
@@ -341,6 +371,7 @@ JSON array:"""
 10. الإجابة يجب أن تكون منسقة ومنظمة (استخدم النقاط والعناوين الفرعية والكود عند الحاجة).
 11. إذا كانت قائمة الترشيحات فارغة، قل فقط: "عذراً، لم أجد روابط يوتيوب مناسبة حالياً."
 12. أجب فقط عن المفهوم المحدد الذي سأل عنه الطالب. المحتوى المسترجع قد يحتوي على عدة مفاهيم أو مواضيع في نفس الجزء — استخرج وقدم فقط ما يتعلق مباشرةً بسؤال الطالب. تجاهل المفاهيم غير ذات الصلة حتى لو كانت في نفس الجزء.
+13. إذا كان إدخال الطالب عبارة عن تحية بسيطة (مثل "مرحباً"، "أهلاً"، "شكراً"، "كيف حالك")، قم بالرد بأدب واسأله كيف يمكنك مساعدته في دراسته. لا تقم بتلخيص أو ذكر المواد الدراسية في هذه الحالة.
 
 تعليمات خاصة بنوع السؤال:
 {instruction}"""
@@ -362,6 +393,7 @@ STRICT RULES — YOU MUST FOLLOW THESE WITHOUT EXCEPTION:
 10. Format all responses with markdown (bullet points, subheadings, code blocks where needed).
 11. If the recommendations list is empty, say: "I'm sorry, I couldn't find any specific YouTube recommendations for this topic at the moment."
 12. Answer ONLY the specific concept asked about. The retrieved content may contain multiple topics or concepts in the same chunk — extract and present ONLY what is directly relevant to the student's question. Silently ignore unrelated concepts even if they appear in the same chunk.
+13. If the user's input is a simple conversational greeting (e.g., "hello", "hey", "thanks", "how are you"), respond politely and conversationally, asking how you can help them with their studies. Do NOT mention or summarize the course materials in this case.
 
 Special instructions for this question type:
 {instruction}"""
@@ -581,7 +613,45 @@ After the disclaimer, provide a helpful, well-structured, and accurate answer.""
         except Exception as e:
             return "Error: Failed to generate a general response."
 
+    def generate_conversational_reply(self, message: str) -> str:
+        """Return a friendly conversational reply for greetings and small-talk.
+        No RAG context is used and no disclaimer is added."""
+        has_arabic = any('\u0600' <= ch <= '\u06FF' for ch in message)
+
+        if has_arabic:
+            sys_prompt = (
+                "أنت مساعد تعليمي ودود. الرسالة الحالية ليست سؤالاً أكاديمياً، "
+                "بل تحية أو رسالة اجتماعية بسيطة. رد بأدب واحترافية، وأخبر الطالب "
+                "أنك هنا لمساعدته في دراسته. لا تذكر أي مواد دراسية ولا تضع أي تحذيرات."
+            )
+        else:
+            sys_prompt = (
+                "You are a friendly educational assistant. The current message is a greeting "
+                "or casual remark — NOT an academic question. Reply warmly and let the student "
+                "know you're here to help with their studies. Do NOT mention course materials "
+                "and do NOT add any disclaimers."
+            )
+
+        if not USE_GROQ or not GROQ_AVAILABLE or not self.client:
+            return "Hey! I'm your study assistant. Feel free to ask me anything about your courses!"
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": message},
+                ],
+                max_tokens=150,
+                temperature=0.7,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Conversational reply failed: {e}")
+            return "Hey! I'm your study assistant. Feel free to ask me anything about your courses!"
+
     def extract_recommendation_topic(self, question: str) -> str:
+
         """Extract the core search topic from a recommendation query."""
         if not USE_GROQ or not GROQ_AVAILABLE or not self.client:
             return question

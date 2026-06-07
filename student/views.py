@@ -227,6 +227,14 @@ class StudentChatBotView(APIView):
             match = re.match(r'^([a-zA-Z]+)', code)
             if match:
                 enrolled_course_codes.append(match.group(1))
+
+            # ── KEY FIX: Qdrant indexes docs by UPPERCASE FOLDER NAME (e.g. 'DATA SCIENCE')
+            # The DB course name may have a suffix like 'Intro', so we generate all
+            # word-prefix n-grams so the exact Qdrant key is always in the filter list.
+            # e.g. 'Data Science Intro' → ['DATA', 'DATA SCIENCE', 'DATA SCIENCE INTRO']
+            words = name.upper().split()
+            for i in range(1, len(words) + 1):
+                enrolled_course_codes.append(' '.join(words[:i]))
             
         try:
             rag = get_rag_pipeline()

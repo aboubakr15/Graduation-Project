@@ -120,6 +120,114 @@ class PresentationMaker:
             return None
 
     # ──────────────────────────────────────────────────────────────────
+    # Markdown presentation support
+    # ──────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def parse_markdown_slides(markdown_str: str) -> List[Dict]:
+        """
+        Parse a Markdown presentation string into a list of slide dicts
+        compatible with create_presentation().
+
+        Expected format::
+
+            # Slide Title
+            - Bullet 1
+            - Bullet 2
+
+            <!-- slide -->
+
+            # Next Slide Title
+            - Bullet 1
+
+        Rules:
+        - Slides are separated by ``<!-- slide -->`` (case-insensitive).
+        - First block  → type = "cover"
+        - Last block   → type = "closing"  (auto-detected or forced)
+        - Other blocks → type = "content"
+        - Lines starting with ``#``   → slide title (first heading wins)
+        - Lines starting with ``-``/``*`` → bullet points
+        - Empty / other lines → ignored
+        """
+        import re as _re
+
+        raw_blocks = _re.split(r'<!--\s*slide\s*-->', markdown_str, flags=_re.IGNORECASE)
+        slides = []
+
+        for raw in raw_blocks:
+            block = raw.strip()
+            if not block:
+                continue
+
+            title = ""
+            bullets = []
+
+            for line in block.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith('#'):
+                    if not title:
+                        title = line.lstrip('#').strip()
+                elif line.startswith('-') or line.startswith('*'):
+                    text = line.lstrip('-*').strip()
+                    if text:
+                        bullets.append(text)
+
+            if not title and not bullets:
+                continue
+
+            slides.append({
+                "type": "content",
+                "title": title or "Slide",
+                "content": bullets,
+                "notes": "",
+            })
+
+        if not slides:
+            return slides
+
+        # Assign cover/closing types
+        slides[0]["type"] = "cover"
+        if len(slides) > 1:
+            last = slides[-1]
+            if last["title"].lower() in ("thank you", "thanks", "closing", "questions"):
+                last["type"] = "closing"
+            else:
+                slides.append({
+                    "type": "closing",
+                    "title": "Thank You",
+                    "content": ["Questions & Discussion"],
+                    "notes": "",
+                })
+
+        return slides
+
+    def create_from_markdown(
+        self,
+        markdown_str: str,
+        image_paths: List[str] = None,
+        filename: str = "presentation.pptx",
+    ) -> Optional[str]:
+        """
+        Convenience wrapper: parse Markdown string and produce a .pptx file.
+
+        Args:
+            markdown_str: Full Markdown deck (``# Title / - bullet / <!-- slide -->``).
+            image_paths:  Optional list of local image paths to embed.
+            filename:     Output filename for the .pptx.
+
+        Returns:
+            Absolute path to the saved .pptx, or ``None`` on error.
+        """
+        slides_data = self.parse_markdown_slides(markdown_str)
+        if not slides_data:
+            logger.error("Markdown parsing returned no slides — aborting PPTX creation.")
+            return None
+        logger.info(f"Parsed {len(slides_data)} slide(s) from Markdown.")
+        return self.create_presentation(slides_data, image_paths=image_paths, filename=filename)
+
+    # ──────────────────────────────────────────────────────────────────
     # Slide builders
     # ──────────────────────────────────────────────────────────────────
 

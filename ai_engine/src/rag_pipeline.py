@@ -118,6 +118,40 @@ class RAGPipeline:
         presentation_keywords = ["presentation", "slides", "powerpoint", "pptx", "make a presentation", "عرض تقديمي", "شرائح", "بوربوينت", "اعمل عرض", "سوي بريزنتيشن", "slideshow", "slideshows", "deck"]
         recommendation_keywords = ["recommend", "suggest", "more resources", "other courses", "another video", "مقترح", "ترشيح", "مصادر أخرى", "كورس آخر", "نرشح", "زيدني"]
         approval_keywords = ["approved", "looks good", "go ahead", "proceed", "تمام", "اعتمد", "ممتاز", "موافق", "باشر", "good", "ok", "nice", "yes", "حلو", "ماشي", "اعمله", "done", "agree", "perfect", "yep", "sure"]
+        # Keywords that signal the user is adjusting an existing blueprint
+        adjustment_keywords = [
+            "remove slide", "add slide", "add a slide", "delete slide", "change slide",
+            "swap slide", "skip slide", "alter slide", "modify slide", "replace slide",
+            "remove the", "add more", "make it shorter", "make it longer",
+            "شيل الشريحة", "احذف الشريحة", "أضف شريحة", "غيّر الشريحة",
+        ]
+
+        # -----------------------------------------------------------------
+        # 0.5. CONVERSATIONAL SHORT-CIRCUIT
+        # If the input is a greeting or small-talk (not an academic question),
+        # skip the entire RAG pipeline and return a friendly reply immediately.
+        # This prevents the disclaimer message from appearing on non-question inputs.
+        # -----------------------------------------------------------------
+        conversational_triggers = [
+            "hey", "hi", "hello", "hola", "howdy", "sup", "what's up", "whats up",
+            "good morning", "good afternoon", "good evening", "good night",
+            "how are you", "how r u", "how's it going", "how are things",
+            "thanks", "thank you", "thx", "ty", "thank u",
+            "bye", "goodbye", "see you", "later", "cya",
+            "مرحبا", "أهلا", "هلا", "سلام", "صباح الخير", "مساء الخير",
+            "كيف حالك", "شكرا", "شكراً", "مع السلامة", "وداعا",
+        ]
+        # A message is conversational if it matches a trigger AND has no '?' AND is short
+        is_conversational = (
+            any(question_lower == trigger or question_lower.startswith(trigger)
+                for trigger in conversational_triggers)
+            and '?' not in question
+            and len(question_lower.split()) <= 8
+        )
+        if is_conversational:
+            logger.info("Conversational input detected — skipping RAG pipeline.")
+            reply = self.generator.generate_conversational_reply(question)
+            return {"answer": reply, "sources": []}
 
         logger.info("Agent 1 (Memory): Rewriting query...")
         rewritten_query = self.generator.rewrite_query_with_memory(question, history or [])
@@ -126,6 +160,7 @@ class RAGPipeline:
         is_presentation = any(keyword in question_lower for keyword in presentation_keywords)
         is_recommendation = any(keyword in question_lower for keyword in recommendation_keywords)
         is_approval = any(keyword in question_lower for keyword in approval_keywords)
+        is_slide_adjustment = any(keyword in question_lower for keyword in adjustment_keywords)
 
         url_pattern = r'https?://(?:www\.)?youtube\.com/watch\?v=[0-9A-Za-z_-]{11}|https?://youtu\.be/[0-9A-Za-z_-]{11}'
         
@@ -134,41 +169,39 @@ class RAGPipeline:
         video_meta = {"title": youtube_data.get("title"), "duration": youtube_data.get("duration")} if youtube_data else None
 
         # -----------------------------------------------------------------
-        # ★ PRESENTATION ARCHITECT FLOW ★
+        # ★ PRESENTATION ARCHITECT FLOW (Markdown-based) ★
         # -----------------------------------------------------------------
-        if is_presentation or is_approval:
-            # Detect Phase 2 (Approval or Adjustment)
-            last_assistant_msg = ""
-            if history:
-                for msg in reversed(history):
-                    if msg["role"] == "assistant":
-                        last_assistant_msg = msg["content"]
-                        break
-            
-            # More robust blueprint detection: scan entire recent history for a blueprint
-            history_text = " ".join([m["content"].upper() for m in history]) if history else ""
-            blueprint_markers = [
-                "PHASE 1: THE BLUEPRINT", 
-                "SLIDE-BY-SLIDE OUTLINE", 
-                "PROPOSED SLIDES", 
-                "BLUEPRINT",
-                "المخطط المبدئي",
-                "REVISED PRESENTATION"
-            ]
-            is_blueprint_context = any(marker in history_text for marker in blueprint_markers) or any(marker in last_assistant_msg.upper() for marker in blueprint_markers)
-            
-            is_phase_2 = is_approval and is_blueprint_context
-            is_adjustment = not is_approval and is_blueprint_context and not is_presentation
+        # ── Find the last assistant message ──────────────────────────
+        last_assistant_msg = ""
+        if history:
+            for msg in reversed(history):
+                if msg["role"] == "assistant":
+                    last_assistant_msg = msg["content"]
+                    break
 
-            logger.info(f"Presentation Architect Flow: {'Phase 2' if is_phase_2 else 'Phase 1/Refinement'}")
-            
-            # Retrieve relevant content for the topic
-            # IMPROVEMENT: In Phase 2, use the Blueprint as the search query to ensure we get the right materials
+        # ── Detect blueprint context ─────────────────────────────────
+        # The Markdown blueprint always contains <!-- slide --> markers.
+        history_text = " ".join([m["content"] for m in history]) if history else ""
+        blueprint_markers = ["<!-- slide -->", "# Thank You", "المخطط المبدئي"]
+        is_blueprint_context = (
+            any(marker in history_text for marker in blueprint_markers)
+            or any(marker in last_assistant_msg for marker in blueprint_markers)
+        )
+
+        if is_presentation or is_approval or is_slide_adjustment or is_blueprint_context:
+
+            is_phase_2 = is_approval and is_blueprint_context
+            # If a blueprint already exists in history, ANY non-approval message
+            # is an adjustment — regardless of whether it contains 'presentation'.
+            is_adjustment = not is_approval and is_blueprint_context
+
+            logger.info(f"Presentation Flow: phase2={is_phase_2}, adjustment={is_adjustment}, blueprint_ctx={is_blueprint_context}")
+
+            # ── Retrieve source material ──────────────────────────────────
             search_query = rewritten_query
             if is_phase_2:
-                # Extract first few lines of blueprint as a search hint
                 search_query = "\n".join(last_assistant_msg.split("\n")[:10])
-                logger.info(f"Phase 2 Search Hint: {search_query[:100]}...")
+                logger.info(f"Phase 2 search hint: {search_query[:100]}...")
 
             raw_documents = forced_documents if forced_documents else self.retriever.retrieve(search_query)
             context_parts = []
@@ -179,23 +212,38 @@ class RAGPipeline:
             full_context = "\n\n".join(context_parts) if context_parts else rewritten_query
 
             if is_phase_2:
-                # PHASE 2: Full Content Generation
-                slides_data = self.generator.get_presentation_final_content(full_context, last_assistant_msg)
+                # ── PHASE 2: Expand blueprint → full Markdown → PPTX ─────
+                logger.info("Phase 2: Generating full Markdown slide deck...")
+                final_md = self.generator.get_presentation_final_md(full_context, last_assistant_msg)
+                if not final_md:
+                    return {"answer": "Error: Could not generate slide content.", "sources": []}
+
                 user_images = [p for p in (image_paths or []) if p and os.path.exists(p)]
-                pptx_path = self.presentation_maker.create_presentation(slides_data, user_images, "generated_presentation.pptx")
-                
+                pptx_path = self.presentation_maker.create_from_markdown(
+                    final_md, user_images, "generated_presentation.pptx"
+                )
+
                 if pptx_path:
-                    msg = f"لقد قمت بإنشاء العرض التقديمي النهائي بناءً على المخطط المعتمد. يمكنك العثور عليه هنا: {pptx_path}" if has_arabic else f"I have generated the final presentation based on the approved blueprint. You can find it here: {pptx_path}"
+                    msg = (
+                        f"لقد قمت بإنشاء العرض التقديمي النهائي. يمكنك العثور عليه هنا: {pptx_path}"
+                        if has_arabic else
+                        f"Your presentation is ready! You can find it here: {pptx_path}"
+                    )
                     return {"answer": msg, "sources": [], "presentation_path": pptx_path}
                 return {"answer": "Error creating the presentation file.", "sources": []}
+
             elif is_adjustment:
-                # REFINEMENT: Update Blueprint based on feedback
-                blueprint = self.generator.get_presentation_blueprint(full_context, f"Adjust the previous blueprint based on this feedback: {question}\n\nPrevious Blueprint:\n{last_assistant_msg}")
-                return {"answer": blueprint, "sources": []}
+                # ── REFINEMENT: Update blueprint based on user feedback ───
+                blueprint_md = self.generator.get_presentation_blueprint_md(
+                    full_context,
+                    f"Adjust the previous blueprint based on this feedback: {question}\n\nPrevious Blueprint:\n{last_assistant_msg}"
+                )
+                return {"answer": blueprint_md, "sources": []}
+
             else:
-                # PHASE 1: Initial Blueprint Generation
-                blueprint = self.generator.get_presentation_blueprint(full_context, question)
-                return {"answer": blueprint, "sources": []}
+                # ── PHASE 1: Generate initial Markdown blueprint ──────────
+                blueprint_md = self.generator.get_presentation_blueprint_md(full_context, question)
+                return {"answer": blueprint_md, "sources": []}
 
         # -----------------------------------------------------------------
         # ★ FAST TRACK: الترشيحات ★
@@ -343,18 +391,15 @@ class RAGPipeline:
                 question, full_context, is_youtube=bool(youtube_data), history=history
             )
             
-            # ★ إزالة تكرار المصادر (نفس الملف ونفس الصفحة) ★
+            # ★ إزالة تكرار المصادر (نفس الملف فقط) ★
             seen_sources = set()
             unique_sources = []
             for doc in documents:
                 file_name = doc.metadata.get('file_name', 'unknown')
-                page = doc.metadata.get('page', 'unknown')
-                source_key = f"{file_name}_p{page}"
-                if source_key not in seen_sources:
-                    seen_sources.add(source_key)
+                if file_name not in seen_sources and file_name != 'unknown':
+                    seen_sources.add(file_name)
                     unique_sources.append({
-                        "content": doc.page_content[:200] + "...", 
-                        "metadata": doc.metadata
+                        "title": file_name
                     })
             
             return {"answer": answer, "sources": unique_sources}
@@ -399,18 +444,15 @@ class RAGPipeline:
                             question, full_global_context, is_youtube=bool(youtube_data), history=history
                         ) + sys_warning
                         
-                        # ★ إزالة تكرار المصادر للبحث الشامل ★
+                        # ★ إزالة تكرار المصادر للبحث الشامل (نفس الملف فقط) ★
                         seen_global_sources = set()
                         global_sources = []
                         for doc in global_docs:
                             file_name = doc.metadata.get('file_name', 'unknown')
-                            page = doc.metadata.get('page', 'unknown')
-                            source_key = f"{file_name}_p{page}"
-                            if source_key not in seen_global_sources:
-                                seen_global_sources.add(source_key)
+                            if file_name not in seen_global_sources and file_name != 'unknown':
+                                seen_global_sources.add(file_name)
                                 global_sources.append({
-                                    "content": doc.page_content[:200] + "...", 
-                                    "metadata": doc.metadata
+                                    "title": file_name
                                 })
                         
                         return {"answer": answer, "sources": global_sources}
