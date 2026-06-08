@@ -13,9 +13,14 @@ class MainConfig(AppConfig):
 
         def convert_datetimefield_value(self, value, expression, connection):
             if isinstance(value, str):
-                parsed = parse_datetime(value)
+                try:
+                    parsed = parse_datetime(value)
+                except ValueError:
+                    parsed = None
                 if parsed is not None:
                     value = parsed
+                else:
+                    return None
             return orig_func(self, value, expression, connection)
 
         DatabaseOperations.convert_datetimefield_value = convert_datetimefield_value
