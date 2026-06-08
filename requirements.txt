@@ -8,7 +8,7 @@ dj-database-url==3.0.1
 whitenoise==6.11.0
 
 # Database
-mysqlclient==2.2.7
+pymysql>=1.1.0
 psycopg2-binary==2.9.9
 
 # AI Engine & LangChain
