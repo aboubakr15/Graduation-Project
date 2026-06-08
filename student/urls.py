@@ -4,14 +4,21 @@ from .views import (
     StudentCourseListView,
     StudentCourseDetailView,
     StudentToDoListView,
-    StudentToDoDetailView,
     StudentProfileView,
     StudentChatBotView,
+    StudentChatConversationDetailView,
+    StudentChatMessagesView,
+    StudentConversationView,
+    StudentConversationDetailView,
     StudentEnrollmentView,
     StudentSubmissionView,
     StudentGradesView,
     StudentNotificationsView,
     StudentMaterialDownloadView,
+    # Rubric-Driven Auto Revision Engine
+    StudentRubricSubmitView,
+    StudentGradingResultListView,
+    StudentGradingResultDetailView,
 )
 
 urlpatterns = [
@@ -25,8 +32,25 @@ urlpatterns = [
     path('notifications/', StudentNotificationsView.as_view(), name='student-notifications'),
     path('notifications/<int:pk>/', StudentNotificationsView.as_view(), name='student-notification-detail'),
     path('todo/', StudentToDoListView.as_view(), name='student-todo-list'),
-    path('todo/<int:pk>/', StudentToDoDetailView.as_view(), name='student-todo-detail'),
     path('profile/', StudentProfileView.as_view(), name='student-profile'),
-    path('chat/', StudentChatBotView.as_view(), name='student-chat'),
     path('materials/<int:pk>/download/', StudentMaterialDownloadView.as_view(), name='student-material-download'),
+
+    # ── Chat ────────────────────────────────────────────────────────────────
+    # Send message / list conversations (legacy GET on same view)
+    path('chat/', StudentChatBotView.as_view(), name='student-chat'),
+    # Get a specific conversation with its messages
+    path('chat/<int:pk>/', StudentChatConversationDetailView.as_view(), name='student-chat-detail'),
+    # Get messages for a conversation via query param: ?conversation_id=X
+    path('chat/messages/', StudentChatMessagesView.as_view(), name='student-chat-messages'),
+
+    # Conversation management (create, list, rename, delete)
+    path('conversations/', StudentConversationView.as_view(), name='student-conversations'),
+    path('conversations/<int:pk>/', StudentConversationDetailView.as_view(), name='student-conversation-detail'),
+
+    # ── Rubric-Driven Auto Revision Engine ──────────────────────────────
+    path('rubric-submit/', StudentRubricSubmitView.as_view(), name='student-rubric-submit'),
+    path('grading-results/', StudentGradingResultListView.as_view(), name='student-grading-results'),
+    path('grading-results/<int:pk>/', StudentGradingResultDetailView.as_view(), name='student-grading-result-detail'),
 ]
+
+

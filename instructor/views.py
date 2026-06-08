@@ -8,11 +8,13 @@ from django.utils import timezone
 from django.db import transaction
 from datetime import timedelta
 import mimetypes
+import re
 
 from main.models import (
     User, CourseOffering, Enrollment, Assignment, CourseMaterial,
     Announcement, ChatConversation, ChatMessage, Notification, StudentSubmission
 )
+from grading.models import GradingResult
 
 from .serializers import (
     DashboardSerializer,
@@ -31,8 +33,7 @@ from .serializers import (
     AnnouncementCreateSerializer,
     ChatConversationSerializer,
     ChatMessageSerializer,
-    NotificationSerializer,
-    InstructorProfileSerializer
+    NotificationSerializer
 )
 
 
@@ -95,7 +96,7 @@ class CourseOfferingListView(APIView):
         serializer = CourseOfferingCreateSerializer(data=request.data)
         if serializer.is_valid():
             course = serializer.save(instructor=request.user)
-            return Response(CourseOfferingDetailSerializer(course, context={'request': request}).data, status=status.HTTP_201_CREATED)
+            return Response(CourseOfferingDetailSerializer(course).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -104,7 +105,7 @@ class CourseOfferingDetailView(APIView):
 
     def get(self, request, pk):
         course = get_object_or_404(CourseOffering, pk=pk)
-        serializer = CourseOfferingDetailSerializer(course, context={'request': request})
+        serializer = CourseOfferingDetailSerializer(course)
         return Response(serializer.data)
 
     def patch(self, request, pk):
@@ -112,7 +113,7 @@ class CourseOfferingDetailView(APIView):
         serializer = CourseOfferingCreateSerializer(course, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            return Response(CourseOfferingDetailSerializer(course, context={'request': request}).data)
+            return Response(CourseOfferingDetailSerializer(course).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
@@ -183,6 +184,30 @@ class MaterialListView(APIView):
             if serializer.is_valid():
                 material = serializer.save(uploaded_by=request.user)
                 created_materials.append(material)
+                
+                # -------------------------------------------------------------
+                # ★ AI Incremental Ingestion ★
+                # -------------------------------------------------------------
+                try:
+                    from ai_engine.ai_services import get_rag_pipeline
+                    rag = get_rag_pipeline()
+                    
+                    # Ensure it's initialized (loads vector store if exists)
+                    if not rag.is_initialized:
+                        try:
+                            rag.vector_store_manager.load_vector_store()
+                            rag.is_initialized = True
+                        except:
+                            logger.warning("Vector store not found during incremental upload. AI will create it.")
+                    
+                    file_path = material.file.path
+                    course_code = material.course_offering.course.code
+                    
+                    logger.info(f"Triggering AI ingestion for: {file_path} (Course: {course_code})")
+                    rag.add_documents(file_path, course_code=course_code)
+                except Exception as ai_e:
+                    logger.error(f"AI Ingestion failed for {material.title}: {str(ai_e)}")
+                    # Note: We don't fail the Django upload if AI indexing fails.
             else:
                 errors.append({
                     "file": uploaded_file.name,
@@ -586,6 +611,212 @@ class ChatMessageListView(APIView):
         return Response(serializer.data)
 
 
+class InstructorChatAIView(APIView):
+    """
+    POST /api/professor/chat/  — Professor sends a message to their own AI assistant.
+    GET  /api/professor/chat/  — (kept) List student conversations in instructor's courses.
+
+    For the GET, add ?mode=own to get the professor's own AI conversations instead.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        mode = request.query_params.get('mode', 'students')
+        if mode == 'own':
+            # Return the professor's own AI conversations
+            conversations = ChatConversation.objects.filter(
+                student=request.user, is_archived=False
+            ).order_by('-updated_at')
+        else:
+            # Legacy: return student conversations in professor's courses
+            courses = CourseOffering.objects.filter(
+                instructor=request.user
+            ) | CourseOffering.objects.filter(tas=request.user)
+            conversations = ChatConversation.objects.filter(
+                course_offering__in=courses.distinct()
+            ).select_related('student', 'course_offering__course')
+            conversations = conversations.order_by('-updated_at')
+        serializer = ChatConversationSerializer(conversations, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        """Professor sends a message to their own AI assistant."""
+        content = request.data.get('content')
+        course_id = request.data.get('course_id')
+        conversation_id = request.data.get('conversation_id')
+
+        if not content:
+            return Response(
+                {'error': 'content is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Resolve course offering
+        course_offering = None
+        if course_id:
+            course_offering = get_object_or_404(CourseOffering, pk=course_id)
+        else:
+            # Default to first course the instructor teaches
+            course_offering = CourseOffering.objects.filter(
+                instructor=request.user
+            ).first()
+
+        # Get or create conversation (professor is stored as 'student' on the model)
+        if conversation_id:
+            conversation = get_object_or_404(
+                ChatConversation, pk=conversation_id, student=request.user
+            )
+        else:
+            conversation = ChatConversation.objects.create(
+                student=request.user,
+                course_offering=course_offering,
+                title=content[:100]
+            )
+
+        # Build conversation history for context
+        history_msgs = conversation.messages.all().order_by('-timestamp')[:10]
+        history = []
+        for m in reversed(history_msgs):
+            role = 'user' if m.role == ChatMessage.Role.USER else 'assistant'
+            history.append({'role': role, 'content': m.content})
+
+        # Save user message
+        user_msg = ChatMessage.objects.create(
+            conversation=conversation,
+            role=ChatMessage.Role.USER,
+            content=content
+        )
+
+        # Build enrolled course filters (all courses instructor teaches)
+        taught_courses = CourseOffering.objects.filter(
+            instructor=request.user
+        ) | CourseOffering.objects.filter(tas=request.user)
+        taught_courses = taught_courses.distinct().select_related('course')
+
+        course_codes = []
+        for co in taught_courses:
+            code = co.course.code
+            name = co.course.name
+            course_codes.append(code)
+            course_codes.append(name)
+            if ' ' in code:
+                course_codes.append(code.split(' ')[0])
+            match = re.match(r'^([a-zA-Z]+)', code)
+            if match:
+                course_codes.append(match.group(1))
+
+        # Query the RAG engine
+        try:
+            from ai_engine.ai_services import get_rag_pipeline
+            rag = get_rag_pipeline()
+            ai_result = rag.query(
+                question=content,
+                history=history,
+                selected_course=None,
+                user_courses=course_codes if course_codes else None
+            )
+            ai_response_content = ai_result.get('answer', "I'm sorry, I couldn't process that.")
+            sources = ai_result.get('sources', [])
+        except Exception as e:
+            logger.error(f'Professor AI chat error: {e}')
+            ai_response_content = f'Error: {str(e)}'
+            sources = []
+
+        # Save AI response
+        ai_msg = ChatMessage.objects.create(
+            conversation=conversation,
+            role=ChatMessage.Role.ASSISTANT,
+            content=ai_response_content,
+            sources_used=sources,
+            was_from_rag=True
+        )
+
+        conversation.save()  # updates updated_at
+
+        return Response({
+            'conversation_id': conversation.id,
+            'user_message': ChatMessageSerializer(user_msg).data,
+            'ai_message': ChatMessageSerializer(ai_msg).data,
+        })
+
+
+class InstructorConversationListView(APIView):
+    """
+    GET  /api/professor/conversations/  — List professor's own AI conversations.
+    POST /api/professor/conversations/  — Create a new empty conversation.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        conversations = ChatConversation.objects.filter(
+            student=request.user, is_archived=False
+        ).order_by('-updated_at')
+        serializer = ChatConversationSerializer(conversations, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        title = request.data.get('title', 'New Conversation')
+        course_id = request.data.get('course_id')
+
+        course_offering = None
+        if course_id:
+            course_offering = get_object_or_404(CourseOffering, pk=course_id)
+        else:
+            course_offering = CourseOffering.objects.filter(
+                instructor=request.user
+            ).first()
+
+        conversation = ChatConversation.objects.create(
+            student=request.user,
+            course_offering=course_offering,
+            title=title[:100]
+        )
+        return Response(
+            ChatConversationSerializer(conversation).data,
+            status=status.HTTP_201_CREATED
+        )
+
+
+class InstructorConversationDetailView(APIView):
+    """
+    GET    /api/professor/conversations/<id>/  — Get conversation + messages.
+    PATCH  /api/professor/conversations/<id>/  — Rename title.
+    DELETE /api/professor/conversations/<id>/  — Archive conversation.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        conversation = get_object_or_404(
+            ChatConversation, pk=pk, student=request.user
+        )
+        messages = conversation.messages.all().order_by('timestamp')
+        data = ChatConversationSerializer(conversation).data
+        data['messages'] = ChatMessageSerializer(messages, many=True).data
+        return Response(data)
+
+    def patch(self, request, pk):
+        conversation = get_object_or_404(
+            ChatConversation, pk=pk, student=request.user
+        )
+        title = request.data.get('title')
+        if not title:
+            return Response(
+                {'error': 'title is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        conversation.title = title[:100]
+        conversation.save()
+        return Response(ChatConversationSerializer(conversation).data)
+
+    def delete(self, request, pk):
+        conversation = get_object_or_404(
+            ChatConversation, pk=pk, student=request.user
+        )
+        conversation.is_archived = True
+        conversation.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class NotificationListView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -601,16 +832,195 @@ class NotificationListView(APIView):
         return Response(NotificationSerializer(notification).data)
 
 
-class InstructorProfileView(APIView):
+# ══════════════════════════════════════════════════════════════════════════════
+# Rubric-Driven Auto Revision Engine — TA / Professor Views
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# These views use models from main/ and serializers from grading/.
+# The grading app itself registers NO URLs (Hollow App pattern).
+# ══════════════════════════════════════════════════════════════════════════════
+
+from grading.serializers import (
+    RubricAssignmentCreateSerializer,
+    RubricAssignmentListSerializer,
+    RubricAssignmentDetailSerializer,
+    GradedSubmissionSerializer,
+    GradingResultSerializer,
+    GradingResultDebugSerializer,
+)
+
+import logging
+logger = logging.getLogger(__name__)
+
+
+def _is_ta_or_professor(user):
+    """Check if the user has TA or Professor role."""
+    return user.primary_role in (User.Role.TA, User.Role.PROFESSOR)
+
+
+class RubricAssignmentListCreateView(APIView):
+    """
+    GET  → List all rubric-graded assignments for the instructor's courses.
+    POST → Create a new assignment with rubric grading enabled.
+
+    Access: TA / Professor only.
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        serializer = InstructorProfileSerializer(request.user)
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can view rubric assignments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        courses = CourseOffering.objects.filter(
+            instructor=request.user
+        ) | CourseOffering.objects.filter(tas=request.user)
+        courses = courses.distinct()
+
+        assignments = Assignment.objects.filter(
+            course_offering__in=courses,
+            grading_type__isnull=False
+        ).select_related(
+            'course_offering__course', 'created_by'
+        ).order_by('-created_at')
+
+        course_id = request.query_params.get('course_offering')
+        if course_id:
+            assignments = assignments.filter(course_offering_id=course_id)
+
+        serializer = RubricAssignmentListSerializer(assignments, many=True)
         return Response(serializer.data)
 
-    def patch(self, request):
-        serializer = InstructorProfileSerializer(request.user, data=request.data, partial=True)
+    def post(self, request):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can create rubric assignments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = RubricAssignmentCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            assignment = serializer.save(created_by=request.user)
+            logger.info(
+                f"Rubric assignment created: '{assignment.title}' "
+                f"(type={assignment.grading_type}) by {request.user.full_name}"
+            )
+            return Response(
+                RubricAssignmentDetailSerializer(assignment).data,
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RubricAssignmentDetailView(APIView):
+    """
+    GET    → Full assignment detail with submissions and grading results.
+    PATCH  → Update assignment fields (rubric, model answer, etc.).
+    DELETE → Delete assignment.
+
+    Access: TA / Professor only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can view assignment details."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        assignment = get_object_or_404(Assignment, pk=pk)
+        serializer = RubricAssignmentDetailSerializer(assignment)
+        return Response(serializer.data)
+
+    def patch(self, request, pk):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can update assignments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        assignment = get_object_or_404(Assignment, pk=pk)
+        serializer = RubricAssignmentCreateSerializer(
+            assignment, data=request.data, partial=True
+        )
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return Response(RubricAssignmentDetailSerializer(assignment).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can delete assignments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        assignment = get_object_or_404(Assignment, pk=pk)
+        assignment.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class RegradeSubmissionView(APIView):
+    """
+    POST → Re-trigger AI grading for a specific submission.
+           Useful when rubric was updated or LLM result was unsatisfactory.
+
+    Access: TA / Professor only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can re-trigger grading."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        submission = get_object_or_404(StudentSubmission, pk=pk)
+
+        if not submission.submitted_text:
+            return Response(
+                {"error": "This submission has no text content to grade."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            from ai_engine.services.grading_service import get_grading_engine
+            engine = get_grading_engine()
+            grading_result = engine.grade_submission(submission.pk)
+
+            return Response({
+                "message": "Re-grading complete.",
+                "result": GradingResultDebugSerializer(grading_result).data,
+            })
+        except Exception as e:
+            logger.error(f"Re-grading failed for submission #{pk}: {e}")
+            return Response(
+                {"error": f"Re-grading failed: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class InstructorGradingResultView(APIView):
+    """
+    GET → View a specific grading result with debug info (raw_llm_response).
+
+    Access: TA / Professor only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        if not _is_ta_or_professor(request.user):
+            return Response(
+                {"error": "Only TAs and Professors can view grading debug info."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        result = get_object_or_404(
+            GradingResult.objects.select_related(
+                'submission__student', 'submission__assignment'
+            ),
+            pk=pk
+        )
+        serializer = GradingResultDebugSerializer(result)
+        return Response(serializer.data)

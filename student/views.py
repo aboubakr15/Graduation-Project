@@ -1,3 +1,7 @@
+import logging
+import os
+import re
+import mimetypes
 from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView, RetrieveAPIView, ListCreateAPIView, RetrieveUpdateAPIView
 from rest_framework.response import Response
@@ -12,6 +16,7 @@ from .serializers import (
     CourseDetailSerializer, 
     ToDoItemSerializer, 
     ChatMessageSerializer,
+    ChatConversationSerializer,
     EnrollmentSerializer,
     StudentSubmissionSerializer,
     GradeSerializer,
@@ -21,8 +26,9 @@ from main.models import (
     User, CourseOffering, Enrollment, TodoItem, ChatConversation, ChatMessage,
     StudentSubmission, Notification, Assignment, Announcement, CourseMaterial
 )
-import mimetypes
-import os
+from grading.models import GradingResult
+
+logger = logging.getLogger(__name__)
 
 class StudentDashboardView(APIView):
     permission_classes = [IsAuthenticated]
@@ -121,24 +127,6 @@ class StudentToDoListView(ListCreateAPIView):
     def perform_create(self, serializer):
         serializer.save(student=self.request.user)
 
-
-class StudentToDoDetailView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def patch(self, request, pk):
-        todo = get_object_or_404(TodoItem, pk=pk, student=request.user)
-        is_completed = request.data.get('is_completed')
-        if is_completed is not None:
-            todo.is_completed = is_completed
-            todo.save()
-        serializer = ToDoItemSerializer(todo)
-        return Response(serializer.data)
-
-    def delete(self, request, pk):
-        todo = get_object_or_404(TodoItem, pk=pk, student=request.user)
-        todo.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
 class StudentProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -153,65 +141,246 @@ class StudentProfileView(APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+from ai_engine.ai_services import get_rag_pipeline
+
 class StudentChatBotView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # Return simplified chat history for the last conversation or all conversations
-        # For now, let's just return the last conversation's messages
-        conversation = ChatConversation.objects.filter(student=request.user).order_by('-updated_at').first()
-        if not conversation:
-            return Response([])
-        
-        messages = conversation.messages.all().order_by('timestamp')
-        serializer = ChatMessageSerializer(messages, many=True)
+        # Return all conversations for the student
+        conversations = ChatConversation.objects.filter(student=request.user, is_archived=False)
+        serializer = ChatConversationSerializer(conversations, many=True)
         return Response(serializer.data)
 
     def post(self, request):
         content = request.data.get('content')
-        course_id = request.data.get('course_id') # Optional, if chatting about a specific course
+        course_id = request.data.get('course_id')
+        conversation_id = request.data.get('conversation_id')
         
         if not content:
             return Response({"error": "Content is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Get or create conversation
-        if course_id:
-             course = get_object_or_404(CourseOffering, pk=course_id)
-             conversation, created = ChatConversation.objects.get_or_create(
-                 student=request.user, course_offering=course
+        if conversation_id:
+            conversation = get_object_or_404(ChatConversation, pk=conversation_id, student=request.user)
+            course_offering = conversation.course_offering
+        elif course_id:
+             course_offering = get_object_or_404(CourseOffering, pk=course_id)
+             # Create a new conversation for this course
+             conversation = ChatConversation.objects.create(
+                 student=request.user, 
+                 course_offering=course_offering,
+                 title=content[:50]  # Use first message as title
              )
         else:
-            # General conversation - maybe link to a dummy "General" course or make course nullable in ChatConversation?
-            # Model says course_offering is required. 
-            # For now, let's pick the first active course or handle this edge case.
-            # Ideally model should allow null course_offering for general chat.
-            # I will query the first available course for now to avoid errors, or fail if no enrollment.
+            # Fallback to first active enrollment if provided, otherwise proceed without one
             enrollment = Enrollment.objects.filter(student=request.user, status=Enrollment.Status.ACTIVE).first()
-            if not enrollment:
-                 return Response({"error": "No active enrollments to start chat context"}, status=status.HTTP_400_BAD_REQUEST)
-            conversation, created = ChatConversation.objects.get_or_create(
-                 student=request.user, course_offering=enrollment.course_offering
+            course_offering = enrollment.course_offering if enrollment else None
+            
+            conversation = ChatConversation.objects.create(
+                 student=request.user, 
+                 course_offering=course_offering,
+                 title=content[:50]
             )
 
-        # Helper to create message
+        # Fetch last 10 messages for context
+        history_msgs = conversation.messages.all().order_by('-timestamp')[:10]
+        history = []
+        for m in reversed(history_msgs):
+            role = "user" if m.role == ChatMessage.Role.USER else "assistant"
+            history.append({"role": role, "content": m.content})
+
+        # Save user message
         user_msg = ChatMessage.objects.create(
             conversation=conversation,
             role=ChatMessage.Role.USER,
             content=content
         )
 
-        # Mock AI Response
-        ai_response_content = f"This is a mock response to '{content}'. I am a student assistant AI."
+        # Execute AI Query
+        selected_course = course_offering.course.code if course_offering else None
+        
+        # Build list of ALL enrolled course identifiers (Codes + Names)
+        # This handles cases where Qdrant might be indexed by folder names instead of codes
+        enrollments = Enrollment.objects.filter(
+            student=request.user,
+            status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED],
+        ).select_related('course_offering__course')
+        
+        # Build list of enrolled course identifiers (Codes + Names + Prefixes)
+        # If a specific course is selected, we only use its identifiers for strictness
+        filter_enrollments = enrollments
+        if course_offering:
+            filter_enrollments = enrollments.filter(course_offering=course_offering)
+            
+        enrolled_course_codes = []
+        for e in filter_enrollments:
+            code = e.course_offering.course.code
+            name = e.course_offering.course.name
+            enrolled_course_codes.append(code)
+            enrolled_course_codes.append(name)
+            
+            # Add prefix (e.g., 'AI 330' -> 'AI')
+            if ' ' in code:
+                enrolled_course_codes.append(code.split(' ')[0])
+            
+            match = re.match(r'^([a-zA-Z]+)', code)
+            if match:
+                enrolled_course_codes.append(match.group(1))
+
+            # ── KEY FIX: Qdrant indexes docs by UPPERCASE FOLDER NAME (e.g. 'DATA SCIENCE')
+            # The DB course name may have a suffix like 'Intro', so we generate all
+            # word-prefix n-grams so the exact Qdrant key is always in the filter list.
+            # e.g. 'Data Science Intro' → ['DATA', 'DATA SCIENCE', 'DATA SCIENCE INTRO']
+            words = name.upper().split()
+            for i in range(1, len(words) + 1):
+                enrolled_course_codes.append(' '.join(words[:i]))
+            
+        try:
+            rag = get_rag_pipeline()
+            ai_result = rag.query(
+                question=content,
+                history=history,
+                selected_course=None, # We handle filtering via user_courses list for better matching
+                user_courses=enrolled_course_codes
+            )
+            ai_response_content = ai_result.get("answer", "I'm sorry, I couldn't process that.")
+            sources = ai_result.get("sources", [])
+        except Exception as e:
+            ai_response_content = f"Error: {str(e)}"
+            sources = []
+
+        # Save AI Response
         ai_msg = ChatMessage.objects.create(
             conversation=conversation,
             role=ChatMessage.Role.ASSISTANT,
-            content=ai_response_content
+            content=ai_response_content,
+            sources_used=sources,
+            was_from_rag=True
         )
         
+        # Update conversation timestamp
+        conversation.save() # Updates updated_at
+        
         return Response({
+            "conversation_id": conversation.id,
             "user_message": ChatMessageSerializer(user_msg).data,
             "ai_message": ChatMessageSerializer(ai_msg).data
         })
+
+class StudentChatConversationDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        conversation = get_object_or_404(ChatConversation, pk=pk, student=request.user)
+        messages = conversation.messages.all().order_by('timestamp')
+        
+        data = ChatConversationSerializer(conversation).data
+        data['messages'] = ChatMessageSerializer(messages, many=True).data
+        
+        return Response(data)
+
+    def delete(self, request, pk):
+        conversation = get_object_or_404(ChatConversation, pk=pk, student=request.user)
+        conversation.is_archived = True
+        conversation.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class StudentChatMessagesView(APIView):
+    """
+    GET /api/student/chat/messages/?conversation_id=<id>
+    Returns all messages in a conversation in chronological order.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        conversation_id = request.query_params.get('conversation_id')
+        if not conversation_id:
+            return Response(
+                {'error': 'conversation_id query parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        conversation = get_object_or_404(
+            ChatConversation, pk=conversation_id, student=request.user
+        )
+        messages = conversation.messages.all().order_by('timestamp')
+        return Response(ChatMessageSerializer(messages, many=True).data)
+
+
+class StudentConversationView(APIView):
+    """
+    GET  /api/student/conversations/        — list all non-archived conversations
+    POST /api/student/conversations/        — create a new empty conversation
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        conversations = ChatConversation.objects.filter(
+            student=request.user, is_archived=False
+        ).order_by('-updated_at')
+        return Response(ChatConversationSerializer(conversations, many=True).data)
+
+    def post(self, request):
+        title = request.data.get('title', 'New Conversation')
+        course_id = request.data.get('course_id')
+
+        course_offering = None
+        if course_id:
+            course_offering = get_object_or_404(CourseOffering, pk=course_id)
+
+        if not course_offering:
+            enrollment = Enrollment.objects.filter(
+                student=request.user, status=Enrollment.Status.ACTIVE
+            ).first()
+            course_offering = enrollment.course_offering if enrollment else None
+
+        conversation = ChatConversation.objects.create(
+            student=request.user,
+            course_offering=course_offering,
+            title=title[:100]
+        )
+        return Response(
+            ChatConversationSerializer(conversation).data,
+            status=status.HTTP_201_CREATED
+        )
+
+
+class StudentConversationDetailView(APIView):
+    """
+    GET    /api/student/conversations/<id>/  — get conversation + its messages
+    PATCH  /api/student/conversations/<id>/  — rename conversation title
+    DELETE /api/student/conversations/<id>/  — archive conversation
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        conversation = get_object_or_404(ChatConversation, pk=pk, student=request.user)
+        messages = conversation.messages.all().order_by('timestamp')
+        data = ChatConversationSerializer(conversation).data
+        data['messages'] = ChatMessageSerializer(messages, many=True).data
+        return Response(data)
+
+    def patch(self, request, pk):
+        conversation = get_object_or_404(ChatConversation, pk=pk, student=request.user)
+        title = request.data.get('title')
+        if not title:
+            return Response(
+                {'error': 'title is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        conversation.title = title[:100]
+        conversation.save()
+        return Response(ChatConversationSerializer(conversation).data)
+
+    def delete(self, request, pk):
+        conversation = get_object_or_404(ChatConversation, pk=pk, student=request.user)
+        conversation.is_archived = True
+        conversation.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+
 
 class StudentEnrollmentView(APIView):
     permission_classes = [IsAuthenticated]
@@ -346,3 +515,183 @@ class StudentMaterialDownloadView(APIView):
         filename = os.path.basename(material.file.name)
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Rubric-Driven Auto Revision Engine — Student Views
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# These views use models from main/ and serializers from grading/.
+# The grading app itself registers NO URLs (Hollow App pattern).
+# ══════════════════════════════════════════════════════════════════════════════
+
+from grading.serializers import (
+    SubmissionCreateSerializer,
+    GradedSubmissionSerializer,
+    GradingResultSerializer,
+)
+
+import logging
+logger_grading = logging.getLogger("grading")
+
+
+class StudentRubricSubmitView(APIView):
+    """
+    POST → Student submits their text/code for a rubric-graded assignment.
+           The system automatically grades the submission using the AI engine.
+
+    Flow:
+        1. Validate the student is enrolled in the course.
+        2. Create or update the StudentSubmission.
+        3. Trigger the GradingEngine to auto-grade.
+        4. Return the submission with grading results.
+
+    Access: Students only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.primary_role != User.Role.STUDENT:
+            return Response(
+                {"error": "Only students can submit assignments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = SubmissionCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        assignment_id = serializer.validated_data['assignment_id']
+        submitted_text = serializer.validated_data['submitted_text']
+
+        assignment = get_object_or_404(Assignment, pk=assignment_id)
+
+        # Verify enrollment
+        if not Enrollment.objects.filter(
+            student=request.user,
+            course_offering=assignment.course_offering,
+            status=Enrollment.Status.ACTIVE
+        ).exists():
+            return Response(
+                {"error": "You are not enrolled in this course."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Create or update submission
+        submission, created = StudentSubmission.objects.update_or_create(
+            student=request.user,
+            assignment=assignment,
+            defaults={
+                'submitted_text': submitted_text,
+                'status': StudentSubmission.Status.SUBMITTED,
+            }
+        )
+
+        logger_grading.info(
+            f"Submission {'created' if created else 'updated'}: "
+            f"#{submission.pk} by {request.user.full_name} "
+            f"for '{assignment.title}'"
+        )
+
+        # ── Auto-Grade ─────────────────────────────────────────────────────────
+        # Trigger the GradingEngine synchronously on submission.
+        # For production, consider Celery for async task processing.
+        # ────────────────────────────────────────────────────────────────────
+        try:
+            from ai_engine.services.grading_service import get_grading_engine
+            engine = get_grading_engine()
+            grading_result = engine.grade_submission(submission.pk)
+
+            logger_grading.info(
+                f"Auto-grading complete: {grading_result.total_score}/{grading_result.max_score}"
+            )
+        except Exception as e:
+            logger_grading.error(f"Auto-grading failed for submission #{submission.pk}: {e}")
+            # Return the submission even if grading failed — don't lose student work
+            return Response(
+                {
+                    "submission": GradedSubmissionSerializer(submission).data,
+                    "grading_error": str(e),
+                    "message": "Submission saved but auto-grading encountered an error. "
+                               "A TA will review manually.",
+                },
+                status=status.HTTP_201_CREATED
+            )
+
+        # Refresh to pick up the grading_result relation
+        submission.refresh_from_db()
+
+        return Response(
+            {
+                "submission": GradedSubmissionSerializer(submission).data,
+                "message": "Submission received and graded successfully.",
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+
+class StudentGradingResultListView(APIView):
+    """
+    GET → Students see all their rubric grading results across all courses.
+
+    Optional query params:
+        - assignment_id: Filter to a specific assignment.
+        - course_offering: Filter to a specific course.
+
+    Access: Students only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.primary_role != User.Role.STUDENT:
+            return Response(
+                {"error": "This endpoint is for students only."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        results = GradingResult.objects.filter(
+            submission__student=request.user
+        ).select_related(
+            'submission__assignment__course_offering__course',
+            'submission__student'
+        ).order_by('-graded_at')
+
+        assignment_id = request.query_params.get('assignment_id')
+        if assignment_id:
+            results = results.filter(submission__assignment_id=assignment_id)
+
+        course_id = request.query_params.get('course_offering')
+        if course_id:
+            results = results.filter(
+                submission__assignment__course_offering_id=course_id
+            )
+
+        serializer = GradingResultSerializer(results, many=True)
+        return Response(serializer.data)
+
+
+class StudentGradingResultDetailView(APIView):
+    """
+    GET → View a single grading result detail.
+
+    Access: Students can only see their own results.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        result = get_object_or_404(
+            GradingResult.objects.select_related(
+                'submission__student', 'submission__assignment'
+            ),
+            pk=pk
+        )
+
+        # Students can only see their own results
+        if result.submission.student_id != request.user.id:
+            return Response(
+                {"error": "You can only view your own grading results."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = GradingResultSerializer(result)
+        return Response(serializer.data)

@@ -5,7 +5,7 @@ from main.models import (
     ChatConversation, ChatMessage, Notification,
     StudentSubmission, Department
 )
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -44,6 +44,7 @@ class CourseOfferingDetailSerializer(serializers.ModelSerializer):
     materials = serializers.SerializerMethodField()
     assignments = serializers.SerializerMethodField()
     enrolled_students = serializers.SerializerMethodField()
+    enrolled_count = serializers.SerializerMethodField()
     
     class Meta:
         model = CourseOffering
@@ -57,7 +58,7 @@ class CourseOfferingDetailSerializer(serializers.ModelSerializer):
     
     def get_materials(self, obj):
         mats = obj.materials.all().order_by('-upload_date')
-        return MaterialSerializer(mats, many=True, context=self.context).data
+        return MaterialSerializer(mats, many=True).data
     
     def get_assignments(self, obj):
         return AssignmentListSerializer(obj.assignments.all(), many=True).data
@@ -106,24 +107,30 @@ _SIZE_LIMITS = {
 class MaterialSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True)
     course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
+    # Points to the authenticated download endpoint, not the raw filesystem path.
     file_download_url = serializers.SerializerMethodField()
 
     class Meta:
         model = CourseMaterial
         fields = [
             'id', 'course_offering', 'course_name', 'title', 'description',
-            'material_type', 'file_download_url', 'file_type',
+            'material_type', 'file_url', 'file_download_url', 'file_type',
             'file_size', 'uploaded_by', 'uploaded_by_name', 'upload_date',
             'is_visible_to_students', 'order_index',
         ]
 
     def get_file_download_url(self, obj):
+        """
+        Returns the URL of the *authenticated* download endpoint for this
+        material.  Clients must hit that endpoint with a valid JWT; the view
+        verifies course membership before streaming the file.
+        """
         request = self.context.get('request')
         if not request:
             return None
-        if obj.file:
+        if obj.file:   # stored binary
             return request.build_absolute_uri(f'/api/professor/materials/{obj.pk}/download/')
-        return None
+        return obj.file_url or None   # legacy external URL fallback
 
 
 class MaterialUploadSerializer(serializers.ModelSerializer):
@@ -184,6 +191,7 @@ class MaterialUploadSerializer(serializers.ModelSerializer):
 
         return CourseMaterial.objects.create(
             **validated_data,
+            file_url='',        # blank – the `file` FileField holds the binary
             file_type=ext,
             file_size=uploaded_file.size,
         )
@@ -307,43 +315,6 @@ class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
         fields = ['id', 'title', 'message', 'notification_type', 'related_object_type', 'related_object_id', 'is_read', 'created_at']
-
-
-class InstructorProfileSerializer(serializers.ModelSerializer):
-    total_courses = serializers.SerializerMethodField()
-    total_students = serializers.SerializerMethodField()
-    upcoming_assignments = serializers.SerializerMethodField()
-
-    class Meta:
-        model = User
-        fields = [
-            'full_name', 'email', 'department', 'profile_picture_url',
-            'total_courses', 'total_students', 'upcoming_assignments'
-        ]
-
-    def get_total_courses(self, obj):
-        return CourseOffering.objects.filter(
-            Q(instructor=obj) | Q(tas=obj)
-        ).distinct().count()
-
-    def get_total_students(self, obj):
-        course_ids = CourseOffering.objects.filter(
-            Q(instructor=obj) | Q(tas=obj)
-        ).distinct().values_list('id', flat=True)
-        return Enrollment.objects.filter(
-            course_offering_id__in=course_ids,
-            status=Enrollment.Status.ACTIVE
-        ).values_list('student_id', flat=True).distinct().count()
-
-    def get_upcoming_assignments(self, obj):
-        from django.utils import timezone
-        course_ids = CourseOffering.objects.filter(
-            Q(instructor=obj) | Q(tas=obj)
-        ).distinct().values_list('id', flat=True)
-        return Assignment.objects.filter(
-            course_offering_id__in=course_ids,
-            due_date__gte=timezone.now()
-        ).count()
 
 
 class DashboardSerializer(serializers.Serializer):

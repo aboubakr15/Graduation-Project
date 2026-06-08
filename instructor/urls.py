@@ -13,10 +13,19 @@ from .views import (
     StudentListView,
     AnnouncementListView,
     AnnouncementDetailView,
+    # Chat — student monitoring (existing)
     ChatConversationListView,
     ChatMessageListView,
+    # Chat — professor's own AI assistant (new)
+    InstructorChatAIView,
+    InstructorConversationListView,
+    InstructorConversationDetailView,
     NotificationListView,
-    InstructorProfileView
+    # Rubric-Driven Auto Revision Engine
+    RubricAssignmentListCreateView,
+    RubricAssignmentDetailView,
+    RegradeSubmissionView,
+    InstructorGradingResultView,
 )
 
 urlpatterns = [
@@ -46,12 +55,24 @@ urlpatterns = [
     # Announcements
     path('announcements/', AnnouncementListView.as_view(), name='instructor-announcements'),
     path('announcements/<int:pk>/', AnnouncementDetailView.as_view(), name='instructor-announcement-detail'),
-    
-    # Chat
-    path('chat/', ChatConversationListView.as_view(), name='instructor-chat'),
+
+    # ── Chat ─────────────────────────────────────────────────────────────────
+    # Monitor student conversations (GET) + Professor's own AI assistant (POST)
+    path('chat/', InstructorChatAIView.as_view(), name='instructor-chat'),
+    # Get messages for any conversation by ID
     path('chat/messages/', ChatMessageListView.as_view(), name='instructor-chat-messages'),
-    
+    # Professor's own AI conversations (create, list, rename, delete)
+    path('conversations/', InstructorConversationListView.as_view(), name='instructor-conversations'),
+    path('conversations/<int:pk>/', InstructorConversationDetailView.as_view(), name='instructor-conversation-detail'),
+
     # Notifications
     path('notifications/', NotificationListView.as_view(), name='instructor-notifications'),
-    path('profile/', InstructorProfileView.as_view(), name='instructor-profile'),
+
+    # ── Rubric-Driven Auto Revision Engine ──────────────────────────────
+    path('rubric-assignments/', RubricAssignmentListCreateView.as_view(), name='instructor-rubric-assignments'),
+    path('rubric-assignments/<int:pk>/', RubricAssignmentDetailView.as_view(), name='instructor-rubric-assignment-detail'),
+    path('submissions/<int:pk>/regrade/', RegradeSubmissionView.as_view(), name='instructor-submission-regrade'),
+    path('grading-results/<int:pk>/', InstructorGradingResultView.as_view(), name='instructor-grading-result'),
 ]
+
+

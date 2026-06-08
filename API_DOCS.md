@@ -182,12 +182,6 @@ Returns success status (empty body).
     "gender_distribution": {
         "male_percentage": 55.5,
         "female_percentage": 44.5
-    },
-    "students_per_department": {
-        "Computer Science": 60,
-        "Information Systems": 45,
-        "Software Engineering": 40,
-        "Unassigned": 5
     }
 }
 ```
@@ -622,57 +616,6 @@ Same as instructor.
 
 ---
 
-## 8. Admin Profile
-
-### Get Admin Profile
-
-| Property | Value |
-|----------|-------|
-| **Endpoint** | `/admin/profile/` |
-| **Method** | `GET` |
-
-Returns admin profile info with system-wide statistics.
-
-#### Response
-
-```json
-{
-    "full_name": "Admin User",
-    "email": "admin@example.com",
-    "department": null,
-    "profile_picture_url": null,
-    "total_students": 150,
-    "total_instructors": 5,
-    "total_courses": 12,
-    "total_tas": 8
-}
-```
-
----
-
-### Update Admin Profile
-
-| Property | Value |
-|----------|-------|
-| **Endpoint** | `/admin/profile/` |
-| **Method** | `PATCH` |
-
-#### Request Body
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `full_name` | string | Full name |
-| `profile_picture_url` | string | Profile picture URL |
-
-```json
-{
-    "full_name": "John Admin",
-    "profile_picture_url": "https://..."
-}
-```
-
----
-
 # Student API
 
 > **Base URL**: `/api/student/`  
@@ -847,7 +790,7 @@ Returns detailed information about a specific course offering, including materia
             "title": "Lecture 1",
             "description": "Intro to ML",
             "material_type": "LECTURE",
-            "file_download_url": "http://localhost:8000/api/student/materials/10/download/",
+            "file_url": "http://...",
             "is_visible_to_students": true
         }
     ],
@@ -1085,49 +1028,7 @@ Returns a combined list of manual to-do items and pending assignments.
 | **Endpoint** | `/api/student/profile/` |
 | **Method** | `GET` |
 
-Returns detailed profile info including current academic level and grades.
-
-#### Response
-
-```json
-{
-    "full_name": "Shahd Shaban",
-    "student_id": "20220236",
-    "department_name": "Computer Science",
-    "current_gpa": "3.80",
-    "student_current_level": 4,
-    "current_streak": 54,
-    "profile_picture_url": null,
-    "enrolled_hours": 18,
-    "daily_streak_mock": {
-        "Mon": true,
-        "Tue": true,
-        "Wed": false,
-        "Thu": true,
-        "Fri": false,
-        "Sat": false,
-        "Sun": false
-    },
-    "grades": [
-        {
-            "course_name": "Machine Learning",
-            "course_code": "CS301",
-            "grade": "95.00",
-            "status": "COMPLETED",
-            "semester": "Fall",
-            "year": 2024
-        },
-        {
-            "course_name": "Data Structures",
-            "course_code": "CS201",
-            "grade": "88.50",
-            "status": "COMPLETED",
-            "semester": "Spring",
-            "year": 2023
-        }
-    ]
-}
-```
+Returns detailed profile info. Same structure as `dashboard.profile`.
 
 ---
 
@@ -1307,7 +1208,6 @@ All Professor endpoints are identical to the Instructor API endpoints. See [Inst
 | GET | `/api/professor/chat/` | List conversations |
 | GET | `/api/professor/chat/messages/` | Get messages |
 | GET/PATCH | `/api/professor/notifications/` | List/Mark notifications |
-| GET/PATCH | `/api/professor/profile/` | **Get/Update profile** |
 
 ---
 
@@ -1339,7 +1239,6 @@ All TA endpoints are identical to the Instructor API endpoints. See [Instructor 
 | GET | `/api/ta/chat/` | List conversations |
 | GET | `/api/ta/chat/messages/` | Get messages |
 | GET/PATCH | `/api/ta/notifications/` | List/Mark notifications |
-| GET/PATCH | `/api/ta/profile/` | **Get/Update profile** |
 
 ---
 
@@ -1373,7 +1272,6 @@ All TA endpoints are identical to the Instructor API endpoints. See [Instructor 
 | GET | `/api/instructor/chat/` | List conversations |
 | GET | `/api/instructor/chat/messages/` | Get messages |
 | GET/PATCH | `/api/instructor/notifications/` | List/Mark notifications |
-| GET/PATCH | `/api/instructor/profile/` | **Get/Update profile** |
 
 ---
 
@@ -1527,7 +1425,7 @@ Returns courses taught by the professor or assisted by the TA.
             "title": "Lecture 1",
             "description": "Intro to ML",
             "material_type": "LECTURE",
-            "file_download_url": "http://localhost:8000/api/professor/materials/1/download/",
+            "file_url": "http://...",
             "is_visible_to_students": true,
             "upload_date": "2024-09-01T10:00:00Z"
         }
@@ -1604,6 +1502,7 @@ Soft delete - sets `is_active` to false.
         "title": "Lecture 1",
         "description": "Intro to ML",
         "material_type": "LECTURE",
+        "file_url": "",
         "file_download_url": "http://localhost:8000/api/professor/materials/1/download/",
         "file_type": "pdf",
         "file_size": 204800,
@@ -1689,6 +1588,7 @@ const materials = await response.json();
         "title": "Lecture 1 - intro.pdf",
         "description": "Intro to ML",
         "material_type": "LECTURE",
+        "file_url": "",
         "file_download_url": "http://localhost:8000/api/instructor/materials/12/download/",
         "file_type": "pdf",
         "file_size": 204800,
@@ -2205,56 +2105,6 @@ Returns all chat conversations for courses taught by the instructor/TA.
 | Field | Type | Description |
 |-------|------|-------------|
 | `is_read` | boolean | Mark as read (true/false) |
-
----
-
-## 11. Profile
-
-### Get Instructor Profile
-
-| Property | Value |
-|----------|-------|
-| **Endpoint** | `/api/instructor/profile/` |
-| **Method** | `GET` |
-
-Returns instructor profile info with teaching-related statistics.
-
-#### Response
-
-```json
-{
-    "full_name": "Dr. Salwa Osman",
-    "email": "salwa@example.com",
-    "department": 1,
-    "profile_picture_url": null,
-    "total_courses": 3,
-    "total_students": 120,
-    "upcoming_assignments": 5
-}
-```
-
----
-
-### Update Instructor Profile
-
-| Property | Value |
-|----------|-------|
-| **Endpoint** | `/api/instructor/profile/` |
-| **Method** | `PATCH` |
-
-#### Request Body
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `full_name` | string | Full name |
-| `profile_picture_url` | string | Profile picture URL |
-
-```json
-{
-    "full_name": "Dr. Salwa Osman",
-    "profile_picture_url": "https://..."
-}
-```
 
 ---
 

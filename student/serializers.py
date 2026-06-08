@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from main.models import (
     User, Announcement, CourseOffering, Enrollment, 
-    Assignment, TodoItem, ChatMessage, CourseMaterial, StudentSubmission, Notification
+    Assignment, TodoItem, ChatConversation, ChatMessage, CourseMaterial, StudentSubmission, Notification
 )
 from django.db.models import Sum
 
@@ -20,6 +20,7 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         ]
 
     def get_enrolled_hours(self, obj):
+        # Calculate total credit hours for active enrollments
         active_enrollments = Enrollment.objects.filter(
             student=obj, status=Enrollment.Status.ACTIVE
         )
@@ -27,6 +28,8 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         return total_hours
 
     def get_daily_streak_mock(self, obj):
+        # Mock data for the UI week view (Mon-Sun)
+        # In a real app, we'd query a daily login log table.
         return {
             "Mon": True, "Tue": True, "Wed": False, 
             "Thu": True, "Fri": False, "Sat": False, "Sun": False
@@ -189,7 +192,33 @@ class ToDoItemSerializer(serializers.ModelSerializer):
 class ChatMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatMessage
-        fields = ['id', 'role', 'content', 'timestamp']
+        fields = ['id', 'role', 'content', 'timestamp', 'sources_used', 'was_from_rag']
+
+class ChatConversationSerializer(serializers.ModelSerializer):
+    course_name = serializers.SerializerMethodField()
+    last_message_preview = serializers.SerializerMethodField()
+    # Keep backward-compat alias
+    last_message = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChatConversation
+        fields = ['id', 'course_offering', 'course_name', 'title', 'created_at', 'updated_at',
+                  'last_message_preview', 'last_message']
+
+    def get_course_name(self, obj):
+        if obj.course_offering and obj.course_offering.course:
+            return obj.course_offering.course.name
+        return None
+
+    def get_last_message_preview(self, obj):
+        last_msg = obj.messages.all().order_by('-timestamp').first()
+        if last_msg:
+            return last_msg.content[:100]
+        return ""
+
+    def get_last_message(self, obj):
+        """Backward-compat alias for last_message_preview."""
+        return self.get_last_message_preview(obj)
 
 class EnrollmentSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
