@@ -185,6 +185,46 @@ Blueprint (Markdown only, no extra text):"""
             logger.error(f"Blueprint (MD) generation failed: {e}")
             return "Error generating presentation blueprint."
 
+    def adjust_presentation_blueprint_md(self, previous_blueprint: str, user_request: str) -> str:
+        """
+        Refinement — Adjust the existing blueprint based on user's feedback.
+        """
+        if not USE_GROQ or not GROQ_AVAILABLE or not self.client:
+            return "Error: LLM not available for blueprint adjustment."
+
+        prompt = f"""You are a Professional Presentation Architect.
+Your ONLY job is to modify the existing presentation outline based on the user's request.
+NEVER explain how to do it or talk to the user.
+
+Here is the existing presentation outline:
+{previous_blueprint}
+
+User request for adjustments:
+{user_request}
+
+OUTPUT FORMAT — YOU MUST FOLLOW THIS EXACTLY:
+- Separate each slide with the HTML comment: <!-- slide -->
+- Each slide block starts with a Markdown heading: # Slide Title
+- Each slide block contains 1-3 SHORT bullet points (just the goal/topic, NOT full sentences).
+  Use a single dash: - bullet
+- The FIRST slide must always be a cover slide (title of the presentation + 1-line subtitle).
+- ABSOLUTELY NO EXTRA TEXT. Do NOT converse, do NOT explain, do NOT say "Here is your updated outline". Output ONLY the slide blocks.
+- Do NOT wrap the output in ```markdown``` fences.
+
+Updated Blueprint (Markdown only, no extra text):"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1500,
+                temperature=0.3,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Blueprint adjustment failed: {e}")
+            return "Error adjusting presentation blueprint."
+
     def get_presentation_final_md(self, content: str, approved_blueprint: str) -> str:
         """
         Phase 2 — Full slide content (Markdown format).

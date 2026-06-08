@@ -234,9 +234,9 @@ class RAGPipeline:
 
             elif is_adjustment:
                 # ── REFINEMENT: Update blueprint based on user feedback ───
-                blueprint_md = self.generator.get_presentation_blueprint_md(
-                    full_context,
-                    f"Adjust the previous blueprint based on this feedback: {question}\n\nPrevious Blueprint:\n{last_assistant_msg}"
+                blueprint_md = self.generator.adjust_presentation_blueprint_md(
+                    last_assistant_msg,
+                    question
                 )
                 return {"answer": blueprint_md, "sources": []}
 
