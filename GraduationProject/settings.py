@@ -16,11 +16,13 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-cvyexs=@w2u6dyvvqvjxc
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = [
+    'eduera-backend-production.up.railway.app',
     'graduation-project-production-be44.up.railway.app',
     '127.0.0.1',
     'localhost',
     ]
 CSRF_TRUSTED_ORIGINS = [
+    'https://eduera-backend-production.up.railway.app',
     'https://graduation-project-production-be44.up.railway.app',
     'http://127.0.0.1:8000',
     ]
@@ -40,6 +42,7 @@ INSTALLED_APPS = [
     'teacher_assistant',
     'administrator',
     'grading',
+    'corsheaders',
     'rest_framework',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
@@ -48,6 +51,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -98,6 +102,14 @@ if 'DATABASE_URL' in os.environ:
         conn_max_age=600,
         conn_health_checks=True,
     )
+
+
+# CORS configuration
+CORS_ALLOWED_ORIGINS = os.environ.get(
+    'CORS_ALLOWED_ORIGINS',
+    'http://localhost:3000,https://eduera-backend-production.up.railway.app'
+).split(',')
+CORS_ALLOW_CREDENTIALS = True
 
 
 # Password validation
