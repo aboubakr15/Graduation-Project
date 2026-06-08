@@ -18,12 +18,14 @@ DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 ALLOWED_HOSTS = [
     'eduera-backend-production.up.railway.app',
     'graduation-project-production-be44.up.railway.app',
+    'eduera.live',
     '127.0.0.1',
     'localhost',
     ]
 CSRF_TRUSTED_ORIGINS = [
     'https://eduera-backend-production.up.railway.app',
     'https://graduation-project-production-be44.up.railway.app',
+    'https://eduera.live',
     'http://127.0.0.1:8000',
     ]
 
@@ -107,7 +109,7 @@ if 'DATABASE_URL' in os.environ:
 # CORS configuration
 CORS_ALLOWED_ORIGINS = os.environ.get(
     'CORS_ALLOWED_ORIGINS',
-    'http://localhost:3000,https://eduera-backend-production.up.railway.app,https://eduera-front-production.up.railway.app'
+    'http://localhost:3000,https://eduera-backend-production.up.railway.app,https://eduera-front-production.up.railway.app,https://eduera.live'
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
 
