@@ -6,4 +6,4 @@
   pip = true
 
 [deploy]
-  startCommand = "gunicorn GraduationProject.wsgi:application --bind 0.0.0.0:$PORT --workers 4"
+  startCommand = "gunicorn GraduationProject.wsgi:application --bind 0.0.0.0:$PORT --workers 4 --timeout 120"
