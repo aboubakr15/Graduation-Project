@@ -244,7 +244,7 @@ class SubmissionSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = StudentSubmission
-        fields = ['id', 'assignment', 'assignment_title', 'course_name', 'student', 'student_name', 'student_email', 'submission_date', 'file_url', 'file_download_url', 'student_answers', 'status', 'grade', 'notes']
+        fields = ['id', 'assignment', 'assignment_title', 'course_name', 'student', 'student_name', 'student_email', 'submission_date', 'file_url', 'file_download_url', 'student_answers', 'submitted_text', 'status', 'grade', 'notes']
     
     def get_file_download_url(self, obj):
         request = self.context.get('request')
