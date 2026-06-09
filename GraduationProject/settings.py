@@ -108,6 +108,11 @@ if 'DATABASE_URL' in os.environ:
         conn_health_checks=True,
     )
 
+# Disable MySQL strict mode for zero dates to fix migration errors on existing data
+if 'OPTIONS' not in DATABASES['default']:
+    DATABASES['default']['OPTIONS'] = {}
+DATABASES['default']['OPTIONS']['init_command'] = "SET sql_mode=''"
+
 
 # CORS configuration
 CORS_ALLOWED_ORIGINS = os.environ.get(
