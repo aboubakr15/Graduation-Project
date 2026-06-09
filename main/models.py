@@ -138,6 +138,7 @@ class CourseOffering(models.Model):
     enrollment_count = models.IntegerField(default=0)
     course_schedule = models.JSONField(default=list, blank=True)  # [{"day": "Monday", "time": "10:00-11:30"}, ...]
     is_active = models.BooleanField(default=True)
+    is_chat_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:

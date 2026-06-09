@@ -169,10 +169,12 @@ class CourseListSerializer(serializers.ModelSerializer):
     course_code = serializers.CharField(source='course_offering.course.code')
     instructor_name = serializers.CharField(source='course_offering.instructor.full_name')
     schedule = serializers.JSONField(source='course_offering.course_schedule')
+    is_chat_active = serializers.BooleanField(source='course_offering.is_chat_active', read_only=True)
 
     class Meta:
         model = Enrollment
-        fields = ['id', 'course_offering', 'course_name', 'course_code', 'instructor_name', 'schedule']
+        fields = ['id', 'course_offering', 'course_name', 'course_code', 'instructor_name', 'schedule', 'is_chat_active']
+
 
 class MaterialSerializer(serializers.ModelSerializer):
     file_download_url = serializers.SerializerMethodField()

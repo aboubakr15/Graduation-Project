@@ -157,6 +157,10 @@ class CourseChatConsumer(AsyncWebsocketConsumer):
         from main.models import CourseChatMessage, CourseOffering
         try:
             offering = CourseOffering.objects.get(pk=course_id)
+            if not offering.is_chat_active:
+                logger.warning(f"User {user.id} tried to send message but chat is disabled for course {course_id}")
+                return None
+                
             msg = CourseChatMessage.objects.create(
                 course_offering=offering,
                 sender=user,

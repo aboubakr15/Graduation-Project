@@ -432,6 +432,9 @@ class StudentCourseChatListView(APIView):
         if not content:
             return Response({'detail': 'content is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        if not offering.is_chat_active:
+            return Response({'detail': 'Chat is currently disabled for this course.'}, status=status.HTTP_403_FORBIDDEN)
+
         msg = CourseChatMessage.objects.create(
             course_offering=offering,
             sender=request.user,

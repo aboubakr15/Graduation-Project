@@ -30,7 +30,7 @@ class CourseOfferingListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = CourseOffering
-        fields = ['id', 'course', 'course_name', 'course_code', 'semester', 'year', 'instructor', 'instructor_name', 'capacity', 'enrolled_count', 'course_schedule', 'is_active']
+        fields = ['id', 'course', 'course_name', 'course_code', 'semester', 'year', 'instructor', 'instructor_name', 'capacity', 'enrolled_count', 'course_schedule', 'is_active', 'is_chat_active']
     
     def get_enrolled_count(self, obj):
         return obj.enrollments.filter(status=Enrollment.Status.ACTIVE).count()
@@ -48,7 +48,7 @@ class CourseOfferingDetailSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = CourseOffering
-        fields = ['id', 'course', 'course_name', 'course_code', 'semester', 'year', 'instructor', 'instructor_name', 'tas', 'capacity', 'enrolled_count', 'course_schedule', 'is_active', 'materials', 'assignments', 'enrolled_students']
+        fields = ['id', 'course', 'course_name', 'course_code', 'semester', 'year', 'instructor', 'instructor_name', 'tas', 'capacity', 'enrolled_count', 'course_schedule', 'is_active', 'is_chat_active', 'materials', 'assignments', 'enrolled_students']
     
     def get_tas(self, obj):
         return [{'id': ta.id, 'full_name': ta.full_name} for ta in obj.tas.all()]
@@ -78,7 +78,7 @@ class CourseOfferingDetailSerializer(serializers.ModelSerializer):
 class CourseOfferingCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CourseOffering
-        fields = ['course', 'semester', 'year', 'instructor', 'tas', 'capacity', 'course_schedule', 'is_active']
+        fields = ['course', 'semester', 'year', 'instructor', 'tas', 'capacity', 'course_schedule', 'is_active', 'is_chat_active']
 
 
 import os
