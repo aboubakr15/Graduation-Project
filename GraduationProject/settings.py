@@ -15,6 +15,9 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-cvyexs=@w2u6dyvvqvjxc
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
+# Trust Railway's proxy so build_absolute_uri returns https:// URLs
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 ALLOWED_HOSTS = [
     'eduera-backend-production.up.railway.app',
     'graduation-project-production-be44.up.railway.app',
