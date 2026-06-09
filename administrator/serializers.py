@@ -62,6 +62,7 @@ class UserSerializer(serializers.ModelSerializer):
     department = serializers.PrimaryKeyRelatedField(
         queryset=Department.objects.all(), allow_null=True, required=False
     )
+    student_current_level = serializers.IntegerField(required=False, allow_null=True)
 
     class Meta:
         model = User
