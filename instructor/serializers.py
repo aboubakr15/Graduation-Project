@@ -58,7 +58,7 @@ class CourseOfferingDetailSerializer(serializers.ModelSerializer):
     
     def get_materials(self, obj):
         mats = obj.materials.all().order_by('-upload_date')
-        return MaterialSerializer(mats, many=True).data
+        return MaterialSerializer(mats, many=True, context=self.context).data
     
     def get_assignments(self, obj):
         return AssignmentListSerializer(obj.assignments.all(), many=True).data
@@ -324,3 +324,9 @@ class DashboardSerializer(serializers.Serializer):
     upcoming_assignments = serializers.IntegerField()
     recent_announcements = AnnouncementSerializer(many=True)
     courses = CourseOfferingListSerializer(many=True)
+
+
+class InstructorProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['full_name', 'email', 'profile_picture_url', 'department']

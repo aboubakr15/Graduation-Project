@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import (
     InstructorDashboardView,
+    InstructorProfileView,
     CourseOfferingListView,
     CourseOfferingDetailView,
     MaterialListView,
@@ -13,15 +14,12 @@ from .views import (
     StudentListView,
     AnnouncementListView,
     AnnouncementDetailView,
-    # Chat — student monitoring (existing)
     ChatConversationListView,
     ChatMessageListView,
-    # Chat — professor's own AI assistant (new)
     InstructorChatAIView,
     InstructorConversationListView,
     InstructorConversationDetailView,
     NotificationListView,
-    # Rubric-Driven Auto Revision Engine
     RubricAssignmentListCreateView,
     RubricAssignmentDetailView,
     RegradeSubmissionView,
@@ -29,8 +27,9 @@ from .views import (
 )
 
 urlpatterns = [
-    # Dashboard
+    # Dashboard & Profile
     path('dashboard/', InstructorDashboardView.as_view(), name='instructor-dashboard'),
+    path('profile/', InstructorProfileView.as_view(), name='instructor-profile'),
     
     # Course Offerings
     path('courses/', CourseOfferingListView.as_view(), name='instructor-courses'),
