@@ -293,6 +293,13 @@ class AdminProfileView(APIView):
         return Response(serializer.data)
 
     def patch(self, request):
+        if 'profile_picture' in request.FILES:
+            from django.core.files.storage import default_storage
+            file = request.FILES['profile_picture']
+            path = default_storage.save(f"profiles/{request.user.id}_{file.name}", file)
+            request.user.profile_picture_url = request.build_absolute_uri(default_storage.url(path))
+            request.user.save()
+
         serializer = AdminProfileSerializer(request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()

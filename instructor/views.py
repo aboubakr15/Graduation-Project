@@ -695,7 +695,7 @@ class SubmissionGradeView(APIView):
             # Grade was already saved — don't fail the whole request
 
         return Response(
-            SubmissionSerializer(submission, context={'request': request}).data,
+            {"message": "Success"},
             status=status.HTTP_200_OK
         )
 
@@ -1374,6 +1374,13 @@ class InstructorProfileView(APIView):
         return Response(serializer.data)
 
     def patch(self, request):
+        if 'profile_picture' in request.FILES:
+            from django.core.files.storage import default_storage
+            file = request.FILES['profile_picture']
+            path = default_storage.save(f"profiles/{request.user.id}_{file.name}", file)
+            request.user.profile_picture_url = request.build_absolute_uri(default_storage.url(path))
+            request.user.save()
+
         serializer = InstructorProfileSerializer(request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()

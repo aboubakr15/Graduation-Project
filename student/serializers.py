@@ -170,10 +170,13 @@ class CourseListSerializer(serializers.ModelSerializer):
     instructor_name = serializers.CharField(source='course_offering.instructor.full_name')
     schedule = serializers.JSONField(source='course_offering.course_schedule')
     is_chat_active = serializers.BooleanField(source='course_offering.is_chat_active', read_only=True)
+    semester = serializers.CharField(source='course_offering.semester', read_only=True)
+    year = serializers.IntegerField(source='course_offering.year', read_only=True)
+    enrolled_count = serializers.IntegerField(source='course_offering.enrollments.count', read_only=True)
 
     class Meta:
         model = Enrollment
-        fields = ['id', 'course_offering', 'course_name', 'course_code', 'instructor_name', 'schedule', 'is_chat_active']
+        fields = ['id', 'course_offering', 'course_name', 'course_code', 'instructor_name', 'schedule', 'is_chat_active', 'semester', 'year', 'enrolled_count']
 
 
 class MaterialSerializer(serializers.ModelSerializer):
