@@ -6,13 +6,17 @@ from django.shortcuts import get_object_or_404
 from django.http import FileResponse, Http404
 from django.utils import timezone
 from django.db import transaction
-from datetime import timedelta
+from datetime import timedelta, datetime
 import mimetypes
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 from main.models import (
     User, CourseOffering, Enrollment, Assignment, CourseMaterial,
-    Announcement, ChatConversation, ChatMessage, Notification, StudentSubmission
+    Course, Department, Announcement, ChatConversation, ChatMessage,
+    Notification, StudentSubmission
 )
 from grading.models import GradingResult
 
@@ -35,6 +39,7 @@ from .serializers import (
     ChatMessageSerializer,
     NotificationSerializer,
     InstructorProfileSerializer,
+    CourseCreateUploadSerializer,
 )
 
 
@@ -376,6 +381,173 @@ class MaterialDownloadView(APIView):
             f'inline; filename="{filename}"'
         )
         return response
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ★ Professor Course Upload — create or update a course, upload a lecture ★
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CourseCreateView(APIView):
+    """
+    POST /api/professor/course-upload/
+    Content-Type: multipart/form-data
+
+    Handles two scenarios in one call:
+      A) New course  — Course + CourseOffering do not exist yet.
+      B) Existing    — Professor adds a new lecture to an existing offering.
+
+    Duplicate guard:
+      If a CourseMaterial with the same `lecture_title` already exists
+      for the resolved CourseOffering, the request is rejected with 409.
+      The check is scoped to (course_offering + title), so two courses
+      can each have a "Lecture 1" without conflict.
+
+    On success:
+      • File is saved to disk.
+      • RAG pipeline embeds the document and pushes it to Qdrant.
+      • Enrolled students are notified.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        # Only professors (and TAs) may upload course material
+        if request.user.primary_role not in (User.Role.PROFESSOR, User.Role.TA):
+            return Response(
+                {'error': 'Only professors and TAs can upload course materials.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = CourseCreateUploadSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+        course_code    = data['course_code'].strip().upper()
+        course_name    = data.get('course_name', '').strip()
+        department     = data.get('department')          # Department instance or None
+        credit_hours   = data.get('credit_hours', 3)
+        semester       = data.get('semester', 'Fall')
+        year           = data.get('year') or datetime.now().year
+        lecture_title  = data['lecture_title'].strip()
+        material_type  = data['material_type']
+        uploaded_file  = data['file']
+        is_visible     = data.get('is_visible_to_students', True)
+
+        # ── 1. Find or create the Course ─────────────────────────────────────
+        course = Course.objects.filter(code=course_code).first()
+        if course is None:
+            # Creating a new course requires a name and a department
+            if not course_name:
+                return Response(
+                    {'error': 'course_name is required when creating a new course.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if department is None:
+                return Response(
+                    {'error': 'department is required when creating a new course.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            course = Course.objects.create(
+                code=course_code,
+                name=course_name,
+                department=department,
+                credit_hours=credit_hours,
+            )
+            logger.info(f"Created new course: {course}")
+
+        # ── 2. Find or create the CourseOffering ─────────────────────────────
+        course_offering, offering_created = CourseOffering.objects.get_or_create(
+            course=course,
+            semester=semester,
+            year=year,
+            instructor=request.user,
+            defaults={
+                'capacity': 30,
+                'is_active': True,
+            },
+        )
+        if offering_created:
+            logger.info(f"Created new CourseOffering: {course_offering}")
+
+        # ── 3. Duplicate lecture guard (scoped to this specific offering) ─────
+        #    Two offerings can each have their own "Lecture 1" — the check is
+        #    deliberately confined to (course_offering + title).
+        if CourseMaterial.objects.filter(
+            course_offering=course_offering,
+            title__iexact=lecture_title,
+        ).exists():
+            return Response(
+                {
+                    'error': 'Lecture already exists for this course offering.',
+                    'detail': (
+                        f'"{lecture_title}" is already uploaded under '
+                        f'{course_offering.course.code} — '
+                        f'{course_offering.semester} {course_offering.year}.'
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # ── 4. Save the file and create the CourseMaterial record ─────────────
+        import os
+        ext = os.path.splitext(uploaded_file.name)[1].lstrip('.').lower()
+        material = CourseMaterial.objects.create(
+            course_offering=course_offering,
+            title=lecture_title,
+            material_type=material_type,
+            file=uploaded_file,
+            file_url='',
+            file_type=ext,
+            file_size=uploaded_file.size,
+            uploaded_by=request.user,
+            is_visible_to_students=is_visible,
+        )
+        logger.info(f"Material saved: {material.title} (id={material.pk})")
+
+        # ── 5. RAG ingestion → Qdrant ─────────────────────────────────────────
+        rag_status = 'ok'
+        try:
+            from ai_engine.ai_services import get_rag_pipeline
+            rag = get_rag_pipeline()
+
+            # Ensure vector store is loaded before incremental add
+            if not rag.is_initialized:
+                try:
+                    rag.vector_store_manager.load_vector_store()
+                    rag.is_initialized = True
+                except Exception:
+                    logger.warning(
+                        'Vector store not found during course upload; '
+                        'RAG pipeline will create it from scratch.'
+                    )
+
+            file_path = material.file.path
+            logger.info(
+                f'Triggering RAG ingestion: {file_path} '
+                f'(course_code={course_code})'
+            )
+            rag.add_documents(file_path, course_code=course_code)
+            logger.info('RAG ingestion complete — document pushed to Qdrant.')
+        except Exception as ai_err:
+            logger.error(f'RAG ingestion failed for "{material.title}": {ai_err}')
+            rag_status = f'warning: RAG ingestion failed — {ai_err}'
+            # We do NOT roll back the DB record if AI indexing fails;
+            # the file is safely stored and can be re-indexed later.
+
+        # ── 6. Notify enrolled students ───────────────────────────────────────
+        if is_visible:
+            MaterialListView._notify_enrolled_students(material)
+
+        # ── 7. Return response ────────────────────────────────────────────────
+        response_data = MaterialSerializer(material, context={'request': request}).data
+        response_data['course_offering_id'] = course_offering.pk
+        response_data['course_code'] = course.code
+        response_data['course_name'] = course.name
+        response_data['offering_created'] = offering_created
+        response_data['rag_ingestion'] = rag_status
+
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
 
 class AssignmentListView(APIView):
@@ -850,8 +1022,7 @@ from grading.serializers import (
     GradingResultDebugSerializer,
 )
 
-import logging
-logger = logging.getLogger(__name__)
+# logger already defined at module level above
 
 
 def _is_ta_or_professor(user):

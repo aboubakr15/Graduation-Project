@@ -4,6 +4,7 @@ from .views import (
     InstructorProfileView,
     CourseOfferingListView,
     CourseOfferingDetailView,
+    CourseCreateView,
     MaterialListView,
     MaterialDetailView,
     MaterialDownloadView,
@@ -31,6 +32,9 @@ urlpatterns = [
     path('dashboard/', InstructorDashboardView.as_view(), name='instructor-dashboard'),
     path('profile/', InstructorProfileView.as_view(), name='instructor-profile'),
     
+    # ★ Course Upload (create or update course + lecture ingestion to Qdrant)
+    path('course-upload/', CourseCreateView.as_view(), name='professor-course-upload'),
+
     # Course Offerings
     path('courses/', CourseOfferingListView.as_view(), name='instructor-courses'),
     path('courses/<int:pk>/', CourseOfferingDetailView.as_view(), name='instructor-course-detail'),

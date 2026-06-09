@@ -330,3 +330,63 @@ class InstructorProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['full_name', 'email', 'profile_picture_url', 'department']
+
+
+# ── Course Upload (create-or-reuse course + upload lecture) ─────────────────
+
+class CourseCreateUploadSerializer(serializers.Serializer):
+    """
+    Validates the multipart/form-data payload for POST /api/professor/course-upload/.
+
+    Fields
+    ------
+    course_code     (required) – e.g. "CS101" or "AI 330"
+    course_name     (optional) – required by the VIEW if the course does not exist yet
+    department      (optional) – Department PK; required by the VIEW for a new course
+    credit_hours    (optional) – defaults to 3
+    semester        (optional) – "Fall" | "Spring" | …  defaults to "Fall"
+    year            (optional) – 4-digit year, defaults to current year
+    lecture_title   (required) – title of the lecture / material
+    material_type   (required) – LECTURE | SECTION | ASSIGNMENT_DESC | OTHER
+    file            (required) – the lecture file binary
+    is_visible_to_students (optional) – defaults to True
+    """
+
+    # Course identification
+    course_code = serializers.CharField(max_length=20)
+    course_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(), required=False, allow_null=True
+    )
+    credit_hours = serializers.IntegerField(min_value=1, max_value=6, default=3)
+
+    # Offering identification
+    semester = serializers.CharField(max_length=20, default='Fall')
+    year = serializers.IntegerField(default=None)  # view fills current year if None
+
+    # Material fields
+    lecture_title = serializers.CharField(max_length=255)
+    material_type = serializers.ChoiceField(
+        choices=CourseMaterial.MaterialType.choices
+    )
+    file = serializers.FileField()
+    is_visible_to_students = serializers.BooleanField(default=True)
+
+    def validate_file(self, uploaded_file):
+        """Reuse the same size / extension rules as MaterialUploadSerializer."""
+        ext = os.path.splitext(uploaded_file.name)[1].lstrip('.').lower()
+
+        if ext not in _SIZE_LIMITS:
+            raise serializers.ValidationError(
+                f"Unsupported file type '.{ext}'. "
+                f"Allowed: {', '.join(sorted(_SIZE_LIMITS.keys()))}"
+            )
+
+        limit = _SIZE_LIMITS[ext]
+        if uploaded_file.size > limit:
+            raise serializers.ValidationError(
+                f".{ext} files must be ≤ {limit // _MB} MB "
+                f"(uploaded: {uploaded_file.size // _MB} MB)."
+            )
+
+        return uploaded_file
