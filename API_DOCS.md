@@ -555,22 +555,20 @@ Same as instructor.
 | `email` | string | No | Email address |
 | `password` | string | No | Password (leave empty to keep current) |
 | `department` | int | No | Department ID |
-| `is_active` | bool | No | Soft-delete: set to `false` to deactivate |
+| `is_active` | bool | No | Set to `false` to deactivate |
 | `gender` | string | No | Gender (`M` or `F`) |
 | `student_current_level` | int | No | Academic level (1-5) |
 
-> **Soft delete pattern**: To remove a user from the UI, send `PATCH /admin/users/{id}/` with `{"is_active": false}`. The record stays in the DB but is filtered out by the frontend.
-
 ---
 
-### Delete User (hard delete)
+### Delete User
 
 | Property | Value |
 |----------|-------|
 | **Endpoint** | `/admin/users/{id}/` |
 | **Method** | `DELETE` |
 
-> **Warning**: Permanently removes the user. Prefer soft delete (`PATCH` with `is_active: false`) in most cases.
+> Permanently removes the user from the database.
 
 ---
 
