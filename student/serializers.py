@@ -75,12 +75,29 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         return total_hours
 
     def get_daily_streak_mock(self, obj):
-        # Mock data for the UI week view (Mon-Sun)
-        # In a real app, we'd query a daily login log table.
-        return {
-            "Mon": True, "Tue": True, "Wed": False, 
-            "Thu": True, "Fri": False, "Sat": False, "Sun": False
-        }
+        from django.utils import timezone
+        import datetime
+        
+        now = timezone.now().date()
+        last_login = obj.last_login.date() if obj.last_login else None
+        streak = obj.current_streak
+        
+        days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        result = {day: False for day in days}
+        
+        if not last_login or streak == 0:
+            return result
+            
+        # Determine active days based on last_login and current_streak
+        week_start = now - datetime.timedelta(days=now.weekday())
+        week_end = week_start + datetime.timedelta(days=6)
+        
+        for i in range(streak):
+            login_date = last_login - datetime.timedelta(days=i)
+            if week_start <= login_date <= week_end:
+                result[days[login_date.weekday()]] = True
+                
+        return result
 
     def get_grades(self, obj):
         enrollments = Enrollment.objects.filter(

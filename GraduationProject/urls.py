@@ -33,4 +33,9 @@ urlpatterns = [
     re_path(r'^presentations/(?P<path>.*)$', serve, {
         'document_root': os.path.join(settings.BASE_DIR, 'presentations'),
     }),
+    
+    # Serve media files (profile pictures, etc)
+    re_path(r'^media/(?P<path>.*)$', serve, {
+        'document_root': settings.MEDIA_ROOT,
+    }),
 ]
