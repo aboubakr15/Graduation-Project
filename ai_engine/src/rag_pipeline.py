@@ -157,10 +157,7 @@ class RAGPipeline:
         rewritten_query = self.generator.rewrite_query_with_memory(question, history or [])
         logger.info(f"Rewritten Query: {rewritten_query}")
 
-        is_presentation = any(keyword in question_lower for keyword in presentation_keywords)
-        is_recommendation = any(keyword in question_lower for keyword in recommendation_keywords)
-        is_approval = any(keyword in question_lower for keyword in approval_keywords)
-        is_slide_adjustment = any(keyword in question_lower for keyword in adjustment_keywords)
+        # We no longer use static keyword arrays. Intent is determined intelligently below.
 
         url_pattern = r'https?://(?:www\.)?youtube\.com/watch\?v=[0-9A-Za-z_-]{11}|https?://youtu\.be/[0-9A-Za-z_-]{11}'
         
@@ -196,12 +193,22 @@ class RAGPipeline:
             or any(marker in last_assistant_msg for marker in blueprint_markers)
         )
 
-        if is_presentation or is_approval or is_slide_adjustment or is_blueprint_context:
+        # ★ INTELLIGENT INTENT DETECTION ★
+        intent = self.generator.detect_intent(question, history_text)
+        logger.info(f"Agent Intent Detection: {intent}")
+
+        is_presentation = intent == "create_presentation"
+        is_approval = intent == "approve_presentation"
+        is_slide_adjustment = intent == "adjust_presentation"
+        is_recommendation = intent == "recommendation"
+
+        # Enter presentation flow ONLY if user explicitly wants to create/adjust/approve it.
+        # If they ask a normal question ("general_question"), ignore the blueprint context.
+        if is_presentation or is_approval or is_slide_adjustment:
 
             is_phase_2 = is_approval and is_blueprint_context
-            # If a blueprint already exists in history, ANY non-approval message
-            # is an adjustment — regardless of whether it contains 'presentation'.
-            is_adjustment = not is_approval and is_blueprint_context
+            # If they are adjusting, but no blueprint exists, fallback to phase 1 (creating it)
+            is_adjustment = is_slide_adjustment and is_blueprint_context
 
             logger.info(f"Presentation Flow: phase2={is_phase_2}, adjustment={is_adjustment}, blueprint_ctx={is_blueprint_context}")
 
@@ -330,8 +337,20 @@ class RAGPipeline:
             # CLEAN the query for retrieval: remove "presentation", "make a", etc. 
             # to prevent them from diluting the vector search.
             clean_search_query = rewritten_query
-            for kw in presentation_keywords + ["make", "create", "about", "discussing", "regarding"]:
-                clean_search_query = clean_search_query.lower().replace(kw, "").strip()
+            stopwords = [
+                "presentation", "slides", "powerpoint", "عرض تقديمي", "سلايدز", "شرائح",
+                "make", "create", "about", "discussing", "regarding",
+                "explain", "summarize", "lecture", "summary", "on", "in", "the",
+                "اشرح", "لخص", "محاضرة", "عن", "في"
+            ]
+            for kw in stopwords:
+                # Add spaces around kw to avoid replacing parts of words, but also handle edges
+                clean_search_query = clean_search_query.lower().replace(f" {kw} ", " ").strip()
+                if clean_search_query.startswith(f"{kw} "):
+                    clean_search_query = clean_search_query[len(kw)+1:].strip()
+                if clean_search_query.endswith(f" {kw}"):
+                    clean_search_query = clean_search_query[:-len(kw)-1].strip()
+
             
             if not clean_search_query: # Fallback if empty
                 clean_search_query = rewritten_query
@@ -386,7 +405,29 @@ class RAGPipeline:
         # 7. Agent Evaluator: هل الداتا دي صح ولا False Positive؟
         # -----------------------------------------------------------------
         logger.info("Agent 3 (Evaluator): Checking if docs contain the answer...")
-        evaluation = self.generator.evaluate_documents(rewritten_query, course_text) 
+        try:
+            evaluation = self.generator.evaluate_documents(rewritten_query, course_text)
+        except Exception as eval_err:
+            # Both Groq and OpenRouter failed during evaluation.
+            # The retrieved docs are already from enrolled courses (filtered by retriever),
+            # so skip evaluation and answer directly from them — no disclaimer needed.
+            logger.warning(f"Evaluation failed on all providers: {eval_err}. Answering from enrolled course docs.")
+            answer = self.generator.generate_answer(
+                question, full_context, is_youtube=bool(youtube_data), history=history
+            )
+            
+            if _is_not_covered(answer):
+                logger.warning("Generator returned NOT_COVERED during fallback. Overriding evaluation to 'No'.")
+                evaluation = "No"
+            else:
+                seen_sources = set()
+                unique_sources = []
+                for doc in documents:
+                    file_name = doc.metadata.get('file_name', 'unknown')
+                    if file_name not in seen_sources and file_name != 'unknown':
+                        seen_sources.add(file_name)
+                        unique_sources.append({"title": file_name})
+                return {"answer": answer, "sources": unique_sources}
         logger.info(f"Evaluation Result: {evaluation}")
 
         # -----------------------------------------------------------------
@@ -399,20 +440,24 @@ class RAGPipeline:
                 question, full_context, is_youtube=bool(youtube_data), history=history
             )
             
-            # ★ إزالة تكرار المصادر (نفس الملف فقط) ★
-            seen_sources = set()
-            unique_sources = []
-            for doc in documents:
-                file_name = doc.metadata.get('file_name', 'unknown')
-                if file_name not in seen_sources and file_name != 'unknown':
-                    seen_sources.add(file_name)
-                    unique_sources.append({
-                        "title": file_name
-                    })
-            
-            return {"answer": answer, "sources": unique_sources}
+            if _is_not_covered(answer):
+                logger.warning("Generator returned NOT_COVERED. Overriding evaluation to 'No'.")
+                evaluation = "No"
+            else:
+                # ★ إزالة تكرار المصادر (نفس الملف فقط) ★
+                seen_sources = set()
+                unique_sources = []
+                for doc in documents:
+                    file_name = doc.metadata.get('file_name', 'unknown')
+                    if file_name not in seen_sources and file_name != 'unknown':
+                        seen_sources.add(file_name)
+                        unique_sources.append({
+                            "title": file_name
+                        })
+                
+                return {"answer": answer, "sources": unique_sources}
 
-        else:
+        if evaluation == "No":
             # ==================================================================
             # ★ الحالة الحرجة: الداتا مش كفاية (False Positive / Not Found)
             # ==================================================================
@@ -484,6 +529,8 @@ class RAGPipeline:
                     answer = self.generator.generate_answer(question, yt_context, is_youtube=True, history=history)
                     return {"answer": answer, "sources": []}
 
-                logger.info("Routing to General Knowledge Generator...")
+                # Docs from enrolled courses don't answer the question specifically.
+                # Fall back to general knowledge with disclaimer.
+                logger.info("Routing to General Knowledge Generator (with disclaimer)...")
                 ans = self.generator.generate_general_answer(question, history)
                 return {"answer": ans, "sources": []}

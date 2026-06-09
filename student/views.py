@@ -179,13 +179,11 @@ class StudentChatBotView(APIView):
                  title=content[:50]  # Use first message as title
              )
         else:
-            # Fallback to first active enrollment if provided, otherwise proceed without one
-            enrollment = Enrollment.objects.filter(student=request.user, status=Enrollment.Status.ACTIVE).first()
-            course_offering = enrollment.course_offering if enrollment else None
-            
+            # General conversation across all courses
+            course_offering = None
             conversation = ChatConversation.objects.create(
                  student=request.user, 
-                 course_offering=course_offering,
+                 course_offering=None,
                  title=content[:50]
             )
 

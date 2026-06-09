@@ -78,12 +78,79 @@ If the code has errors, point them out clearly.""",
 }
 
 
+class GroqFallbackWrapper:
+    """Wraps the Groq client to provide automatic fallback to OpenRouter when limits are hit."""
+    def __init__(self, groq_client):
+        self.groq_client = groq_client
+        self.chat = self.Chat(self)
+        
+    class Chat:
+        def __init__(self, parent):
+            self.completions = self.Completions(parent)
+            
+        class Completions:
+            def __init__(self, parent):
+                self.parent = parent
+                
+            def create(self, model, messages, max_tokens=1024, temperature=0.5):
+                import os, requests
+                try:
+                    return self.parent.groq_client.chat.completions.create(
+                        model=model, messages=messages, max_tokens=max_tokens, temperature=temperature
+                    )
+                except Exception as e:
+                    logger.warning(f"Groq API failed: {e}. Falling back to OpenRouter (Qwen).")
+                    or_key = os.getenv("NVIDIA_API_KEY")
+                    if not or_key:
+                        logger.error("OpenRouter API key (NVIDIA_API_KEY) not found in env.")
+                        raise e
+                    
+                    headers = {
+                        "Authorization": f"Bearer {or_key}",
+                        "Content-Type": "application/json"
+                    }
+                    data = {
+                        "model": "qwen/qwen-2.5-7b-instruct",
+                        "messages": messages,
+                        "max_tokens": max_tokens,
+                        "temperature": temperature
+                    }
+                    
+                    try:
+                        logger.info(f"Calling OpenRouter with model: {data['model']}")
+                        res = requests.post(
+                            "https://openrouter.ai/api/v1/chat/completions",
+                            headers=headers,
+                            json=data,
+                            timeout=(10, 30)  # 10s connect timeout, 30s read timeout
+                        )
+                        if not res.ok:
+                            logger.error(f"OpenRouter returned error {res.status_code}: {res.text}")
+                            res.raise_for_status()
+                        
+                        resp_json = res.json()
+                        content = resp_json["choices"][0]["message"]["content"]
+                        logger.info("OpenRouter fallback succeeded.")
+                        
+                        # Mock the Groq response object structure so the rest of the code works unmodified
+                        class MockMsg:
+                            def __init__(self, content): self.content = content
+                        class MockChoice:
+                            def __init__(self, content): self.message = MockMsg(content)
+                        class MockResponse:
+                            def __init__(self, content): self.choices = [MockChoice(content)]
+                            
+                        return MockResponse(content)
+                    except Exception as or_error:
+                        logger.error(f"OpenRouter Fallback failed: {or_error}")
+                        raise e
+
 class Generator:
     def __init__(self):
         self.model   = GROQ_MODEL
         self.api_key = GROQ_API_KEY
         if GROQ_AVAILABLE and self.api_key:
-            self.client = Groq(api_key=self.api_key)
+            self.client = GroqFallbackWrapper(Groq(api_key=self.api_key))
         else:
             self.client = None
 
@@ -410,7 +477,7 @@ Full Markdown deck (no extra text):"""
 9. استخدم سجل المحادثة لفهم الأسئلة المتابعة.
 10. الإجابة يجب أن تكون منسقة ومنظمة (استخدم النقاط والعناوين الفرعية والكود عند الحاجة).
 11. إذا كانت قائمة الترشيحات فارغة، قل فقط: "عذراً، لم أجد روابط يوتيوب مناسبة حالياً."
-12. أجب فقط عن المفهوم المحدد الذي سأل عنه الطالب. المحتوى المسترجع قد يحتوي على عدة مفاهيم أو مواضيع في نفس الجزء — استخرج وقدم فقط ما يتعلق مباشرةً بسؤال الطالب. تجاهل المفاهيم غير ذات الصلة حتى لو كانت في نفس الجزء.
+12. إذا سأل الطالب عن مفهوم محدد، استخرج وقدم فقط ما يتعلق بهذا المفهوم وتجاهل المواضيع غير ذات الصلة. ولكن، إذا طلب الطالب شرحاً عاماً أو تلخيصاً للمحاضرة، يجب عليك شرح وتلخيص جميع المواضيع والمفاهيم التقنية الرئيسية الموجودة في المحتوى. لا تكتفِ بذكر المصادر، بل اشرح المادة العلمية نفسها.
 13. إذا كان إدخال الطالب عبارة عن تحية بسيطة (مثل "مرحباً"، "أهلاً"، "شكراً"، "كيف حالك")، قم بالرد بأدب واسأله كيف يمكنك مساعدته في دراسته. لا تقم بتلخيص أو ذكر المواد الدراسية في هذه الحالة.
 
 تعليمات خاصة بنوع السؤال:
@@ -432,7 +499,7 @@ STRICT RULES — YOU MUST FOLLOW THESE WITHOUT EXCEPTION:
 9. Use conversation history to understand follow-up questions.
 10. Format all responses with markdown (bullet points, subheadings, code blocks where needed).
 11. If the recommendations list is empty, say: "I'm sorry, I couldn't find any specific YouTube recommendations for this topic at the moment."
-12. Answer ONLY the specific concept asked about. The retrieved content may contain multiple topics or concepts in the same chunk — extract and present ONLY what is directly relevant to the student's question. Silently ignore unrelated concepts even if they appear in the same chunk.
+12. If the user asks about a specific concept, extract and present ONLY what is directly relevant to that concept, ignoring unrelated topics. HOWEVER, if the user asks for a general explanation or summary of the lecture/document, you MUST summarize all the main technical topics and concepts present in the provided content. Do not just list resources; explain the actual course material itself.
 13. If the user's input is a simple conversational greeting (e.g., "hello", "hey", "thanks", "how are you"), respond politely and conversationally, asking how you can help them with their studies. Do NOT mention or summarize the course materials in this case.
 
 Special instructions for this question type:
@@ -555,18 +622,20 @@ Latest question:"""
         
         if has_arabic:
             prompt = f"""أنت مساعد أكاديمي. انظر إلى سؤال الطالب والمحتوى المستخرج من المحاضرات.
-هل المحتوى يحتوي على أي معلومات متعلقة بموضوع السؤال؟
-إذا كان المحتوى يتحدث عن موضوع مختلف تماماً ولا علاقة له بالسؤال، أجب بـ "No".
-إذا كان المحتوى يحتوي على الإجابة، أو جزء منها، أو حتى مفاهيم متعلقة تساعد في الشرح، أجب بـ "Yes".
+افترض أن هذا المحتوى مأخوذ بالفعل من المادة الصحيحة.
+هل المحتوى يحتوي على أي معلومات يمكن استخدامها للإجابة أو تلخيص موضوع السؤال؟
+إذا كان المحتوى يتحدث عن موضوع مختلف تماماً ولا يمكن استخدامه بأي شكل، أجب بـ "No".
+إذا كان المحتوى يحتوي على الإجابة، أو جزء منها، أو حتى مفاهيم عامة من المحاضرة، أجب بـ "Yes".
 أجب بكلمة واحدة فقط: Yes أو No.
  
 السؤال: {question}
 المحتوى: {context[:2000]}"""
         else:
             prompt = f"""You are an academic assistant. Look at the student's question and the retrieved lecture content.
-Does this content contain ANY information related to the topic of the question?
-If the content is completely irrelevant or about a different subject, output "No".
-If it contains the answer, a partial answer, or relevant concepts that help explain the topic, output "Yes".
+Assume this content is already verified to be from the correct course.
+Does this content contain ANY information that could be used to answer or summarize the topic of the question?
+If the content is completely irrelevant and cannot be used at all, output "No".
+If it contains the answer, a partial answer, general concepts from the lecture, or if the question is asking for a general summary of the lecture, output "Yes".
 Output EXACTLY one word: Yes or No.
 
 Question: {question}
@@ -579,18 +648,10 @@ Context: {context[:2000]}"""
             answer = response.choices[0].message.content.strip()
             return "Yes" if "yes" in answer.lower() else "No"
         except Exception as e:
-            logger.error(f"Evaluation failed: {e}")
-            return "No"
-
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model, messages=[{"role": "user", "content": prompt}], max_tokens=5, temperature=0.0
-            )
-            answer = response.choices[0].message.content.strip()
-            return "Yes" if "yes" in answer.lower() else "No"
-        except Exception as e:
-            logger.error(f"Evaluation failed: {e}")
-            return "No"
+            # Only reaches here if BOTH Groq and the OpenRouter fallback (in GroqFallbackWrapper) failed.
+            # Re-raise so the caller (rag_pipeline) can decide the fallback behavior.
+            logger.error(f"Evaluation agent failed on all providers: {e}")
+            raise
 
     def route_query(self, question: str) -> str:
         """Agent 3: Router - هل السؤال أكاديمي/جامعي محض ولا معرفة عامة؟"""
@@ -598,16 +659,16 @@ Context: {context[:2000]}"""
         
         if has_arabic:
             prompt = f"""صنف السؤال التالي إلى فئة واحدة فقط:
-1. college_specific: أسئلة عن الدرجات، المواعيد، سياسات القسم، أساتذة معينين، أو تسجيل المواد.
-2. general_knowledge: أسئلة عن مفاهيم علمية، برمجة، رياضيات، أو نظريات يمكن الإجابة عليها من المعرفة العامة.
-أجب فقط بكلمة واحدة: college_specific أو general_knowledge.
+- college_specific: أسئلة فقط حول الشئون الإدارية، أسماء الدكاترة، مواعيد الامتحانات، الجداول، أو الدرجات.
+- general_academic: أسئلة علمية، أو طلبات تلخيص وشرح المحاضرات، السلايدز، المناهج، أو مفاهيم الذكاء الاصطناعي والبرمجة.
+أجب بكلمة واحدة فقط من الكلمتين أعلاه.
 
 السؤال: {question}"""
         else:
             prompt = f"""Classify the following question into exactly one category:
-1. college_specific: Questions about grades, schedules, department policies, specific professors, or course registration.
-2. general_knowledge: Questions about scientific concepts, programming, math, or theories that can be answered from general knowledge.
-Output EXACTLY one word: college_specific or general_knowledge.
+- college_specific: Questions ONLY about administrative affairs, professors' names, exam dates, schedules, or grades.
+- general_academic: Scientific questions, OR requests to summarize/explain lectures, slides, curriculum, programming, or engineering topics.
+Output EXACTLY one word from the two options above.
 
 Question: {question}"""
 
@@ -615,12 +676,45 @@ Question: {question}"""
             response = self.client.chat.completions.create(
                 model=self.model, messages=[{"role": "user", "content": prompt}], max_tokens=20, temperature=0.0
             )
-            answer = response.choices[0].message.content.strip().lower()
-            if "college" in answer:
-                return "college_specific"
-            return "general_knowledge"
+            ans = response.choices[0].message.content.strip().lower()
+            return "general_academic" if "general_academic" in ans else "college_specific"
         except Exception as e:
-            return "general_knowledge"
+            logger.error(f"Routing failed: {e}")
+            return "general_academic"
+
+    def detect_intent(self, question: str, history_text: str) -> str:
+        """Agent: Intent Detector - intelligently classify user request to avoid keyword collisions."""
+        prompt = f"""You are an Intent Detection Agent for an educational AI assistant.
+Analyze the user's latest question in the context of their chat history (if any).
+Classify the user's intent into EXACTLY ONE of the following categories:
+
+- "create_presentation": The user explicitly wants to generate a new PowerPoint presentation, slide deck, or presentation outline. (e.g., "create a presentation about AI", "make slides for this topic").
+- "adjust_presentation": The user is asking to modify, add, remove, or change slides in an ALREADY EXISTING presentation blueprint.
+- "approve_presentation": The user is approving an existing presentation blueprint to be finalized/downloaded (e.g., "looks good", "perfect, generate it").
+- "recommendation": The user is asking for external resources, YouTube videos, or course recommendations to learn more.
+- "general_question": A normal academic question, asking for an explanation, summary, or asking the bot to "go over slides" / "explain these slides". (This is NOT creating a presentation).
+
+Output EXACTLY ONE WORD from the quotes above. No other text.
+
+Chat History Context:
+{history_text[-1000:] if history_text else "None"}
+
+Latest Question: {question}"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model, messages=[{"role": "user", "content": prompt}], max_tokens=10, temperature=0.0
+            )
+            intent = response.choices[0].message.content.strip().lower()
+            # Clean up the response just in case
+            for valid_intent in ["create_presentation", "adjust_presentation", "approve_presentation", "recommendation", "general_question"]:
+                if valid_intent in intent:
+                    return valid_intent
+            return "general_question"
+        except Exception as e:
+            logger.error(f"Intent detection failed: {e}")
+            return "general_question"
+
 
     def generate_general_answer(self, question: str, history: list = None) -> str:
         """Agent 4: General Fallback - يجاوب من دماغه مع Disclaimer."""
