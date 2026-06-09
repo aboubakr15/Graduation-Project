@@ -10,6 +10,7 @@ from .views import (
     MaterialDownloadView,
     AssignmentListView,
     AssignmentDetailView,
+    AssignmentDownloadView,
     SubmissionListView,
     SubmissionGradeView,
     SubmissionDownloadView,
@@ -48,6 +49,7 @@ urlpatterns = [
     # Assignments
     path('assignments/', AssignmentListView.as_view(), name='instructor-assignments'),
     path('assignments/<int:pk>/', AssignmentDetailView.as_view(), name='instructor-assignment-detail'),
+    path('assignments/<int:pk>/download/', AssignmentDownloadView.as_view(), name='instructor-assignment-download'),
     
     # Submissions
     path('submissions/', SubmissionListView.as_view(), name='instructor-submissions'),

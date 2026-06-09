@@ -431,26 +431,17 @@ class StudentSubmissionView(APIView):
         if not Enrollment.objects.filter(student=request.user, course_offering=assignment.course_offering, status=Enrollment.Status.ACTIVE).exists():
             return Response({"error": "Not enrolled in this course"}, status=status.HTTP_403_FORBIDDEN)
 
+        defaults = {
+            'file_url': file_url or '',
+            'status': StudentSubmission.Status.SUBMITTED
+        }
         if uploaded_file:
-            import os
-            from django.conf import settings
-            sub_dir = settings.MEDIA_ROOT / 'submissions'
-            os.makedirs(sub_dir, exist_ok=True)
-            ext = os.path.splitext(uploaded_file.name)[1]
-            filename = f"sub_{request.user.id}_{assignment_id}_{uuid.uuid4().hex[:8]}{ext}"
-            filepath = os.path.join(sub_dir, filename)
-            with open(filepath, 'wb+') as f:
-                for chunk in uploaded_file.chunks():
-                    f.write(chunk)
-            file_url = f'/media/submissions/{filename}'
+            defaults['file'] = uploaded_file
 
         submission, created = StudentSubmission.objects.update_or_create(
             student=request.user,
             assignment=assignment,
-            defaults={
-                'file_url': file_url or '',
-                'status': StudentSubmission.Status.SUBMITTED
-            }
+            defaults=defaults
         )
         return Response(StudentSubmissionSerializer(submission).data, status=status.HTTP_201_CREATED)
 
@@ -554,6 +545,46 @@ class StudentMaterialDownloadView(APIView):
         return response
 
 
+class StudentAssignmentDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        assignment = get_object_or_404(
+            Assignment.objects.select_related('course_offering'),
+            pk=pk,
+        )
+        is_enrolled = Enrollment.objects.filter(
+            student=request.user,
+            course_offering=assignment.course_offering,
+            status=Enrollment.Status.ACTIVE,
+        ).exists()
+
+        if not is_enrolled:
+            return Response(
+                {'detail': 'You are not enrolled in this course.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not getattr(assignment, 'file', None):
+            return Response(
+                {'detail': 'No file is stored for this assignment.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        mime_type, _ = mimetypes.guess_type(assignment.file.name)
+        mime_type = mime_type or 'application/octet-stream'
+
+        response = FileResponse(
+            assignment.file.open('rb'),
+            content_type=mime_type,
+            as_attachment=False,
+        )
+        import os
+        filename = os.path.basename(assignment.file.name)
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
+
+
 class StudentSubmissionDownloadView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -564,6 +595,18 @@ class StudentSubmissionDownloadView(APIView):
             student=request.user,
         )
         file_path = submission.file_url
+        if getattr(submission, 'file', None):
+            mime_type, _ = mimetypes.guess_type(submission.file.name)
+            mime_type = mime_type or 'application/octet-stream'
+            response = FileResponse(
+                submission.file.open('rb'),
+                content_type=mime_type,
+                as_attachment=False,
+            )
+            import os
+            response['Content-Disposition'] = f'inline; filename="{os.path.basename(submission.file.name)}"'
+            return response
+            
         if not file_path:
             return Response(
                 {'detail': 'No file for this submission.'},
@@ -572,6 +615,7 @@ class StudentSubmissionDownloadView(APIView):
         # file_url is either /media/submissions/... or an external URL
         if file_path.startswith('/media/'):
             from django.conf import settings
+            import os
             full_path = os.path.join(str(settings.MEDIA_ROOT), file_path.replace('/media/', '').lstrip('/'))
             if not os.path.exists(full_path):
                 return Response(

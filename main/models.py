@@ -229,6 +229,7 @@ class Assignment(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     description_material = models.ForeignKey(CourseMaterial, on_delete=models.SET_NULL, null=True, blank=True, related_name='related_assignments')
+    file = models.FileField(upload_to='assignments/%Y/%m/', null=True, blank=True)
 
     # if auto correctable, store questions and model answers as JSON
     is_auto_correctable = models.BooleanField(default=False)
@@ -295,6 +296,7 @@ class StudentSubmission(models.Model):
     student = models.ForeignKey(User, on_delete=models.CASCADE,related_name='submissions', limit_choices_to={'primary_role': User.Role.STUDENT})
     submission_date = models.DateTimeField(auto_now_add=True)
     file_url = models.URLField(null=True, blank=True)
+    file = models.FileField(upload_to='submissions/%Y/%m/', null=True, blank=True)
     student_answers = models.JSONField(default=dict, blank=True)
     # ── Rubric-Driven Auto Revision Engine ──────────────────────────────
     # Free-text or code content for rubric-based AI grading.

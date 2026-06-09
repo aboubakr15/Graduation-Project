@@ -191,10 +191,11 @@ class MaterialSerializer(serializers.ModelSerializer):
 
 class AssignmentSerializer(serializers.ModelSerializer):
     submitted = serializers.SerializerMethodField()
+    file_download_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Assignment
-        fields = ['id', 'title', 'description', 'due_date', 'total_points', 'submitted']
+        fields = ['id', 'title', 'description', 'due_date', 'total_points', 'submitted', 'file_download_url']
 
     def get_submitted(self, obj):
         request = self.context.get('request')
@@ -203,6 +204,14 @@ class AssignmentSerializer(serializers.ModelSerializer):
         return StudentSubmission.objects.filter(
             assignment=obj, student=request.user
         ).exists()
+
+    def get_file_download_url(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return None
+        if getattr(obj, 'file', None):
+            return request.build_absolute_uri(f'/api/student/assignments/{obj.pk}/download/')
+        return None
 
 class CourseDetailSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name')
@@ -299,6 +308,8 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request:
             return None
+        if getattr(obj, 'file', None):
+            return request.build_absolute_uri(f'/api/student/submissions/{obj.pk}/download/')
         if obj.file_url and obj.file_url.startswith('/media/'):
             return request.build_absolute_uri(f'/api/student/submissions/{obj.pk}/download/')
         return obj.file_url or None
@@ -313,10 +324,19 @@ class GradeSerializer(serializers.ModelSerializer):
 
 class StudentAssignmentListSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
+    file_download_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Assignment
-        fields = ['id', 'title', 'course_offering', 'course_name', 'due_date', 'total_points']
+        fields = ['id', 'title', 'course_offering', 'course_name', 'due_date', 'total_points', 'file_download_url']
+
+    def get_file_download_url(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return None
+        if getattr(obj, 'file', None):
+            return request.build_absolute_uri(f'/api/student/assignments/{obj.pk}/download/')
+        return None
 
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:

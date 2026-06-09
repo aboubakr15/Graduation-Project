@@ -600,6 +600,45 @@ class AssignmentDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class AssignmentDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        assignment = get_object_or_404(
+            Assignment.objects.select_related('course_offering'),
+            pk=pk,
+        )
+        offering = assignment.course_offering
+        user = request.user
+        is_instructor = (offering.instructor_id == user.pk)
+        is_ta = offering.tas.filter(pk=user.pk).exists()
+        
+        if not (is_instructor or is_ta):
+            return Response(
+                {'detail': 'You do not have access to this assignment.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not getattr(assignment, 'file', None):
+            return Response(
+                {'detail': 'No file is stored for this assignment.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        mime_type, _ = mimetypes.guess_type(assignment.file.name)
+        mime_type = mime_type or 'application/octet-stream'
+
+        response = FileResponse(
+            assignment.file.open('rb'),
+            content_type=mime_type,
+            as_attachment=False,
+        )
+        import os
+        filename = os.path.basename(assignment.file.name)
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
+
+
 class SubmissionListView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -683,6 +722,18 @@ class SubmissionDownloadView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
         file_path = submission.file_url
+        if getattr(submission, 'file', None):
+            mime_type, _ = mimetypes.guess_type(submission.file.name)
+            mime_type = mime_type or 'application/octet-stream'
+            response = FileResponse(
+                submission.file.open('rb'),
+                content_type=mime_type,
+                as_attachment=False,
+            )
+            import os
+            response['Content-Disposition'] = f'inline; filename="{os.path.basename(submission.file.name)}"'
+            return response
+            
         if not file_path:
             return Response(
                 {'detail': 'No file for this submission.'},
@@ -690,6 +741,7 @@ class SubmissionDownloadView(APIView):
             )
         if file_path.startswith('/media/'):
             from django.conf import settings
+            import os
             full_path = os.path.join(str(settings.MEDIA_ROOT), file_path.replace('/media/', '').lstrip('/'))
             if not os.path.exists(full_path):
                 return Response(

@@ -18,6 +18,7 @@ from .views import (
     StudentNotificationsView,
     StudentMaterialDownloadView,
     StudentSubmissionDownloadView,
+    StudentAssignmentDownloadView,
     # Rubric-Driven Auto Revision Engine
     StudentRubricSubmitView,
     StudentGradingResultListView,
@@ -31,6 +32,7 @@ urlpatterns = [
     path('enrollments/', StudentEnrollmentView.as_view(), name='student-enrollments'),
     path('enrollments/<int:pk>/', StudentEnrollmentView.as_view(), name='student-enrollment-detail'),
     path('assignments/', StudentAssignmentListView.as_view(), name='student-assignments'),
+    path('assignments/<int:pk>/download/', StudentAssignmentDownloadView.as_view(), name='student-assignment-download'),
     path('submissions/', StudentSubmissionView.as_view(), name='student-submissions'),
     path('grades/', StudentGradesView.as_view(), name='student-grades'),
     path('notifications/', StudentNotificationsView.as_view(), name='student-notifications'),
