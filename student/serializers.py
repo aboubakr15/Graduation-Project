@@ -122,14 +122,10 @@ class CourseListSerializer(serializers.ModelSerializer):
     course_code = serializers.CharField(source='course_offering.course.code')
     instructor_name = serializers.CharField(source='course_offering.instructor.full_name')
     schedule = serializers.JSONField(source='course_offering.course_schedule')
-    progress = serializers.SerializerMethodField()
 
     class Meta:
         model = Enrollment
-        fields = ['id', 'course_name', 'course_code', 'instructor_name', 'schedule', 'progress']
-
-    def get_progress(self, obj):
-        return 45 # Mock value
+        fields = ['id', 'course_offering', 'course_name', 'course_code', 'instructor_name', 'schedule']
 
 class MaterialSerializer(serializers.ModelSerializer):
     file_download_url = serializers.SerializerMethodField()
@@ -246,10 +242,19 @@ class EnrollmentSerializer(serializers.ModelSerializer):
 class StudentSubmissionSerializer(serializers.ModelSerializer):
     assignment_title = serializers.CharField(source='assignment.title', read_only=True)
     course_name = serializers.CharField(source='assignment.course_offering.course.name', read_only=True)
+    file_download_url = serializers.SerializerMethodField()
 
     class Meta:
         model = StudentSubmission
-        fields = ['id', 'assignment', 'assignment_title', 'course_name', 'submission_date', 'file_url', 'status', 'notes']
+        fields = ['id', 'assignment', 'assignment_title', 'course_name', 'submission_date', 'file_url', 'file_download_url', 'status', 'notes']
+
+    def get_file_download_url(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return None
+        if obj.file_url and obj.file_url.startswith('/media/'):
+            return request.build_absolute_uri(f'/api/student/submissions/{obj.pk}/download/')
+        return obj.file_url or None
 
 class GradeSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
@@ -258,6 +263,13 @@ class GradeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Enrollment
         fields = ['id', 'course_name', 'course_code', 'grade', 'status']
+
+class StudentAssignmentListSerializer(serializers.ModelSerializer):
+    course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
+
+    class Meta:
+        model = Assignment
+        fields = ['id', 'title', 'course_offering', 'course_name', 'due_date', 'total_points']
 
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:

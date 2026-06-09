@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import uuid
 import mimetypes
 from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView, RetrieveAPIView, ListCreateAPIView, RetrieveUpdateAPIView
@@ -50,7 +51,7 @@ class StudentDashboardView(APIView):
 
     def _get_portal_announcements(self):
         from .serializers import AnnouncementSerializer
-        anns = Announcement.objects.filter(is_global=True).order_by('-created_at')[:3]
+        anns = Announcement.objects.filter(is_global=True, author__primary_role=User.Role.ADMIN).order_by('-created_at')[:3]
         return AnnouncementSerializer(anns, many=True).data
 
     def _get_course_announcements(self, user):
@@ -413,20 +414,34 @@ class StudentSubmissionView(APIView):
     def post(self, request):
         assignment_id = request.data.get('assignment_id')
         file_url = request.data.get('file_url')
-        
+        uploaded_file = request.FILES.get('file')
+
         if not assignment_id:
             return Response({"error": "assignment_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         assignment = get_object_or_404(Assignment, pk=assignment_id)
-        
+
         if not Enrollment.objects.filter(student=request.user, course_offering=assignment.course_offering, status=Enrollment.Status.ACTIVE).exists():
             return Response({"error": "Not enrolled in this course"}, status=status.HTTP_403_FORBIDDEN)
-        
+
+        if uploaded_file:
+            import os
+            from django.conf import settings
+            sub_dir = settings.MEDIA_ROOT / 'submissions'
+            os.makedirs(sub_dir, exist_ok=True)
+            ext = os.path.splitext(uploaded_file.name)[1]
+            filename = f"sub_{request.user.id}_{assignment_id}_{uuid.uuid4().hex[:8]}{ext}"
+            filepath = os.path.join(sub_dir, filename)
+            with open(filepath, 'wb+') as f:
+                for chunk in uploaded_file.chunks():
+                    f.write(chunk)
+            file_url = f'/media/submissions/{filename}'
+
         submission, created = StudentSubmission.objects.update_or_create(
             student=request.user,
             assignment=assignment,
             defaults={
-                'file_url': file_url,
+                'file_url': file_url or '',
                 'status': StudentSubmission.Status.SUBMITTED
             }
         )
@@ -442,6 +457,21 @@ class StudentGradesView(APIView):
             grade__isnull=False
         ).order_by('-enrollment_date')
         serializer = GradeSerializer(enrollments, many=True)
+        return Response(serializer.data)
+
+class StudentAssignmentListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        enrolled_offering_ids = Enrollment.objects.filter(
+            student=request.user,
+            status=Enrollment.Status.ACTIVE
+        ).values_list('course_offering_id', flat=True)
+        assignments = Assignment.objects.filter(
+            course_offering_id__in=enrolled_offering_ids
+        ).order_by('due_date')
+        from .serializers import StudentAssignmentListSerializer
+        serializer = StudentAssignmentListSerializer(assignments, many=True)
         return Response(serializer.data)
 
 class StudentNotificationsView(APIView):
@@ -516,6 +546,43 @@ class StudentMaterialDownloadView(APIView):
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return response
 
+
+class StudentSubmissionDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        submission = get_object_or_404(
+            StudentSubmission.objects.select_related('assignment__course_offering'),
+            pk=pk,
+            student=request.user,
+        )
+        file_path = submission.file_url
+        if not file_path:
+            return Response(
+                {'detail': 'No file for this submission.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        # file_url is either /media/submissions/... or an external URL
+        if file_path.startswith('/media/'):
+            from django.conf import settings
+            full_path = os.path.join(str(settings.MEDIA_ROOT), file_path.replace('/media/', '').lstrip('/'))
+            if not os.path.exists(full_path):
+                return Response(
+                    {'detail': 'File not found on server.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            mime_type, _ = mimetypes.guess_type(full_path)
+            mime_type = mime_type or 'application/octet-stream'
+            response = FileResponse(
+                open(full_path, 'rb'),
+                content_type=mime_type,
+                as_attachment=False,
+            )
+            response['Content-Disposition'] = f'inline; filename="{os.path.basename(full_path)}"'
+            return response
+        # external URL – redirect
+        from django.shortcuts import redirect
+        return redirect(file_path)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Rubric-Driven Auto Revision Engine — Student Views

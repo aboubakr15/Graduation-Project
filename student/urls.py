@@ -13,8 +13,10 @@ from .views import (
     StudentEnrollmentView,
     StudentSubmissionView,
     StudentGradesView,
+    StudentAssignmentListView,
     StudentNotificationsView,
     StudentMaterialDownloadView,
+    StudentSubmissionDownloadView,
     # Rubric-Driven Auto Revision Engine
     StudentRubricSubmitView,
     StudentGradingResultListView,
@@ -27,6 +29,7 @@ urlpatterns = [
     path('courses/<int:pk>/', StudentCourseDetailView.as_view(), name='student-course-detail'),
     path('enrollments/', StudentEnrollmentView.as_view(), name='student-enrollments'),
     path('enrollments/<int:pk>/', StudentEnrollmentView.as_view(), name='student-enrollment-detail'),
+    path('assignments/', StudentAssignmentListView.as_view(), name='student-assignments'),
     path('submissions/', StudentSubmissionView.as_view(), name='student-submissions'),
     path('grades/', StudentGradesView.as_view(), name='student-grades'),
     path('notifications/', StudentNotificationsView.as_view(), name='student-notifications'),
@@ -34,6 +37,7 @@ urlpatterns = [
     path('todo/', StudentToDoListView.as_view(), name='student-todo-list'),
     path('profile/', StudentProfileView.as_view(), name='student-profile'),
     path('materials/<int:pk>/download/', StudentMaterialDownloadView.as_view(), name='student-material-download'),
+    path('submissions/<int:pk>/download/', StudentSubmissionDownloadView.as_view(), name='student-submission-download'),
 
     # ── Chat ────────────────────────────────────────────────────────────────
     # Send message / list conversations (legacy GET on same view)
