@@ -75,12 +75,29 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         return total_hours
 
     def get_daily_streak_mock(self, obj):
-        # Mock data for the UI week view (Mon-Sun)
-        # In a real app, we'd query a daily login log table.
-        return {
-            "Mon": True, "Tue": True, "Wed": False, 
-            "Thu": True, "Fri": False, "Sat": False, "Sun": False
-        }
+        from django.utils import timezone
+        import datetime
+        
+        now = timezone.now().date()
+        last_login = obj.last_login.date() if obj.last_login else None
+        streak = obj.current_streak
+        
+        days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        result = {day: False for day in days}
+        
+        if not last_login or streak == 0:
+            return result
+            
+        # Determine active days based on last_login and current_streak
+        week_start = now - datetime.timedelta(days=now.weekday())
+        week_end = week_start + datetime.timedelta(days=6)
+        
+        for i in range(streak):
+            login_date = last_login - datetime.timedelta(days=i)
+            if week_start <= login_date <= week_end:
+                result[days[login_date.weekday()]] = True
+                
+        return result
 
     def get_grades(self, obj):
         enrollments = Enrollment.objects.filter(
@@ -169,10 +186,15 @@ class CourseListSerializer(serializers.ModelSerializer):
     course_code = serializers.CharField(source='course_offering.course.code')
     instructor_name = serializers.CharField(source='course_offering.instructor.full_name')
     schedule = serializers.JSONField(source='course_offering.course_schedule')
+    is_chat_active = serializers.BooleanField(source='course_offering.is_chat_active', read_only=True)
+    semester = serializers.CharField(source='course_offering.semester', read_only=True)
+    year = serializers.IntegerField(source='course_offering.year', read_only=True)
+    enrolled_count = serializers.IntegerField(source='course_offering.enrollments.count', read_only=True)
 
     class Meta:
         model = Enrollment
-        fields = ['id', 'course_offering', 'course_name', 'course_code', 'instructor_name', 'schedule']
+        fields = ['id', 'course_offering', 'course_name', 'course_code', 'instructor_name', 'schedule', 'is_chat_active', 'semester', 'year', 'enrolled_count']
+
 
 class MaterialSerializer(serializers.ModelSerializer):
     file_download_url = serializers.SerializerMethodField()
@@ -191,10 +213,11 @@ class MaterialSerializer(serializers.ModelSerializer):
 
 class AssignmentSerializer(serializers.ModelSerializer):
     submitted = serializers.SerializerMethodField()
+    file_download_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Assignment
-        fields = ['id', 'title', 'description', 'due_date', 'total_points', 'submitted']
+        fields = ['id', 'title', 'description', 'due_date', 'total_points', 'submitted', 'file_download_url']
 
     def get_submitted(self, obj):
         request = self.context.get('request')
@@ -203,6 +226,14 @@ class AssignmentSerializer(serializers.ModelSerializer):
         return StudentSubmission.objects.filter(
             assignment=obj, student=request.user
         ).exists()
+
+    def get_file_download_url(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return None
+        if getattr(obj, 'file', None):
+            return request.build_absolute_uri(f'/api/student/assignments/{obj.pk}/download/')
+        return None
 
 class CourseDetailSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name')
@@ -299,6 +330,8 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request:
             return None
+        if getattr(obj, 'file', None):
+            return request.build_absolute_uri(f'/api/student/submissions/{obj.pk}/download/')
         if obj.file_url and obj.file_url.startswith('/media/'):
             return request.build_absolute_uri(f'/api/student/submissions/{obj.pk}/download/')
         return obj.file_url or None
@@ -313,10 +346,19 @@ class GradeSerializer(serializers.ModelSerializer):
 
 class StudentAssignmentListSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
+    file_download_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Assignment
-        fields = ['id', 'title', 'course_offering', 'course_name', 'due_date', 'total_points']
+        fields = ['id', 'title', 'course_offering', 'course_name', 'due_date', 'total_points', 'file_download_url']
+
+    def get_file_download_url(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return None
+        if getattr(obj, 'file', None):
+            return request.build_absolute_uri(f'/api/student/assignments/{obj.pk}/download/')
+        return None
 
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:

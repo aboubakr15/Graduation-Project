@@ -600,6 +600,45 @@ class AssignmentDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class AssignmentDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        assignment = get_object_or_404(
+            Assignment.objects.select_related('course_offering'),
+            pk=pk,
+        )
+        offering = assignment.course_offering
+        user = request.user
+        is_instructor = (offering.instructor_id == user.pk)
+        is_ta = offering.tas.filter(pk=user.pk).exists()
+        
+        if not (is_instructor or is_ta):
+            return Response(
+                {'detail': 'You do not have access to this assignment.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not getattr(assignment, 'file', None):
+            return Response(
+                {'detail': 'No file is stored for this assignment.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        mime_type, _ = mimetypes.guess_type(assignment.file.name)
+        mime_type = mime_type or 'application/octet-stream'
+
+        response = FileResponse(
+            assignment.file.open('rb'),
+            content_type=mime_type,
+            as_attachment=False,
+        )
+        import os
+        filename = os.path.basename(assignment.file.name)
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
+
+
 class SubmissionListView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -628,32 +667,43 @@ class SubmissionGradeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        """Grade a student submission. Saves grade first, then updates enrollment average."""
         submission = get_object_or_404(StudentSubmission, pk=pk)
         serializer = GradeSubmissionSerializer(data=request.data)
-        
-        if serializer.is_valid():
-            grade = serializer.validated_data['grade']
-            notes = serializer.validated_data.get('notes', '')
-            
-            submission.grade = grade
-            submission.notes = notes
-            submission.status = StudentSubmission.Status.GRADED
-            submission.save()
-            
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        grade = serializer.validated_data['grade']
+        notes = serializer.validated_data.get('notes', '')
+
+        # Always save the core grade first — enrollment update is best-effort
+        submission.grade = grade
+        submission.notes = notes
+        submission.status = StudentSubmission.Status.GRADED
+        submission.save()
+
+        try:
             enrollment = Enrollment.objects.filter(
                 student=submission.student,
                 course_offering=submission.assignment.course_offering
             ).first()
             if enrollment:
                 self._update_enrollment_grade(enrollment)
-            
-            return Response(SubmissionSerializer(submission, context={'request': request}).data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+        except Exception as e:
+            logger.warning(f'Enrollment grade update failed for submission #{pk}: {e}')
+            # Grade was already saved — don't fail the whole request
+
+        return Response(
+            {"message": "Success"},
+            status=status.HTTP_200_OK
+        )
+
     def _update_enrollment_grade(self, enrollment):
+        """Recalculate and persist the weighted enrollment grade."""
         assignments = Assignment.objects.filter(course_offering=enrollment.course_offering)
-        total_points = sum(a.total_points for a in assignments)
-        
+        total_points = sum(float(a.total_points) for a in assignments)
+
         if total_points > 0:
             submissions = StudentSubmission.objects.filter(
                 student=enrollment.student,
@@ -683,6 +733,18 @@ class SubmissionDownloadView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
         file_path = submission.file_url
+        if getattr(submission, 'file', None):
+            mime_type, _ = mimetypes.guess_type(submission.file.name)
+            mime_type = mime_type or 'application/octet-stream'
+            response = FileResponse(
+                submission.file.open('rb'),
+                content_type=mime_type,
+                as_attachment=False,
+            )
+            import os
+            response['Content-Disposition'] = f'inline; filename="{os.path.basename(submission.file.name)}"'
+            return response
+            
         if not file_path:
             return Response(
                 {'detail': 'No file for this submission.'},
@@ -690,6 +752,7 @@ class SubmissionDownloadView(APIView):
             )
         if file_path.startswith('/media/'):
             from django.conf import settings
+            import os
             full_path = os.path.join(str(settings.MEDIA_ROOT), file_path.replace('/media/', '').lstrip('/'))
             if not os.path.exists(full_path):
                 return Response(
@@ -1054,6 +1117,62 @@ class NotificationListView(APIView):
         return Response(NotificationSerializer(notification).data)
 
 
+class CourseChatListView(APIView):
+    """
+    GET  /api/professor/courses/<id>/chat/  — Return the last 100 messages for the course.
+    POST /api/professor/courses/<id>/chat/  — Post a new message to the course chat.
+
+    Access: Instructor or TA of the course only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _get_offering_or_403(self, request, pk):
+        """Return the offering if the requester is instructor/TA, else None."""
+        offering = get_object_or_404(CourseOffering, pk=pk)
+        user = request.user
+        if offering.instructor_id == user.pk or offering.tas.filter(pk=user.pk).exists():
+            return offering
+        return None
+
+    def get(self, request, pk):
+        """Return last 100 messages chronologically."""
+        from main.models import CourseChatMessage
+        from .serializers import CourseChatMessageSerializer
+        offering = self._get_offering_or_403(request, pk)
+        if offering is None:
+            return Response({'detail': 'Access denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        msgs = CourseChatMessage.objects.filter(
+            course_offering=offering
+        ).order_by('created_at').select_related('sender')[:100]
+        return Response(CourseChatMessageSerializer(msgs, many=True).data)
+
+    def post(self, request, pk):
+        """Post a new message from the instructor/TA."""
+        from main.models import CourseChatMessage
+        from .serializers import CourseChatMessageSerializer
+        offering = self._get_offering_or_403(request, pk)
+        if offering is None:
+            return Response({'detail': 'Access denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        content = (request.data.get('content') or '').strip()
+        if not content:
+            return Response({'detail': 'content is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not offering.is_chat_active:
+            return Response({'detail': 'Chat is currently disabled for this course.'}, status=status.HTTP_403_FORBIDDEN)
+
+        msg = CourseChatMessage.objects.create(
+            course_offering=offering,
+            sender=request.user,
+            sender_name=request.user.full_name,
+            sender_role=request.user.primary_role,
+            content=content,
+        )
+        return Response(CourseChatMessageSerializer(msg).data, status=status.HTTP_201_CREATED)
+
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Rubric-Driven Auto Revision Engine — TA / Professor Views
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1255,6 +1374,13 @@ class InstructorProfileView(APIView):
         return Response(serializer.data)
 
     def patch(self, request):
+        if 'profile_picture' in request.FILES:
+            from django.core.files.storage import default_storage
+            file = request.FILES['profile_picture']
+            path = default_storage.save(f"profiles/{request.user.id}_{file.name}", file)
+            request.user.profile_picture_url = request.build_absolute_uri(default_storage.url(path))
+            request.user.save()
+
         serializer = InstructorProfileSerializer(request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()

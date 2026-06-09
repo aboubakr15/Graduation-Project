@@ -143,6 +143,13 @@ class StudentProfileView(APIView):
         return Response(serializer.data)
 
     def patch(self, request):
+        if 'profile_picture' in request.FILES:
+            from django.core.files.storage import default_storage
+            file = request.FILES['profile_picture']
+            path = default_storage.save(f"profiles/{request.user.id}_{file.name}", file)
+            request.user.profile_picture_url = request.build_absolute_uri(default_storage.url(path))
+            request.user.save()
+
         serializer = StudentProfileSerializer(request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
@@ -386,6 +393,61 @@ class StudentConversationDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class StudentCourseChatListView(APIView):
+    """
+    GET  /api/student/courses/<id>/chat/  — Return the last 100 messages for the course.
+    POST /api/student/courses/<id>/chat/  — Send a new message to the course chat.
+
+    Access: Students actively enrolled in the course only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _check_enrollment(self, user, course_id):
+        """Return the CourseOffering if user is enrolled (ACTIVE), else None."""
+        offering = get_object_or_404(CourseOffering, pk=course_id)
+        enrolled = Enrollment.objects.filter(
+            student=user,
+            course_offering=offering,
+            status=Enrollment.Status.ACTIVE,
+        ).exists()
+        return offering if enrolled else None
+
+    def get(self, request, pk):
+        """Return last 100 messages chronologically for the course."""
+        from main.models import CourseChatMessage
+        from instructor.serializers import CourseChatMessageSerializer
+        offering = self._check_enrollment(request.user, pk)
+        if offering is None:
+            return Response({'detail': 'You are not enrolled in this course.'}, status=status.HTTP_403_FORBIDDEN)
+
+        msgs = CourseChatMessage.objects.filter(
+            course_offering=offering
+        ).order_by('created_at').select_related('sender')[:100]
+        return Response(CourseChatMessageSerializer(msgs, many=True).data)
+
+    def post(self, request, pk):
+        """Send a new message to the course group chat."""
+        from main.models import CourseChatMessage
+        from instructor.serializers import CourseChatMessageSerializer
+        offering = self._check_enrollment(request.user, pk)
+        if offering is None:
+            return Response({'detail': 'You are not enrolled in this course.'}, status=status.HTTP_403_FORBIDDEN)
+
+        content = (request.data.get('content') or '').strip()
+        if not content:
+            return Response({'detail': 'content is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not offering.is_chat_active:
+            return Response({'detail': 'Chat is currently disabled for this course.'}, status=status.HTTP_403_FORBIDDEN)
+
+        msg = CourseChatMessage.objects.create(
+            course_offering=offering,
+            sender=request.user,
+            sender_name=request.user.full_name,
+            sender_role=request.user.primary_role,
+            content=content,
+        )
+        return Response(CourseChatMessageSerializer(msg).data, status=status.HTTP_201_CREATED)
 
 
 class StudentEnrollmentView(APIView):
@@ -429,26 +491,17 @@ class StudentSubmissionView(APIView):
         if not Enrollment.objects.filter(student=request.user, course_offering=assignment.course_offering, status=Enrollment.Status.ACTIVE).exists():
             return Response({"error": "Not enrolled in this course"}, status=status.HTTP_403_FORBIDDEN)
 
+        defaults = {
+            'file_url': file_url or '',
+            'status': StudentSubmission.Status.SUBMITTED
+        }
         if uploaded_file:
-            import os
-            from django.conf import settings
-            sub_dir = settings.MEDIA_ROOT / 'submissions'
-            os.makedirs(sub_dir, exist_ok=True)
-            ext = os.path.splitext(uploaded_file.name)[1]
-            filename = f"sub_{request.user.id}_{assignment_id}_{uuid.uuid4().hex[:8]}{ext}"
-            filepath = os.path.join(sub_dir, filename)
-            with open(filepath, 'wb+') as f:
-                for chunk in uploaded_file.chunks():
-                    f.write(chunk)
-            file_url = f'/media/submissions/{filename}'
+            defaults['file'] = uploaded_file
 
         submission, created = StudentSubmission.objects.update_or_create(
             student=request.user,
             assignment=assignment,
-            defaults={
-                'file_url': file_url or '',
-                'status': StudentSubmission.Status.SUBMITTED
-            }
+            defaults=defaults
         )
         return Response(StudentSubmissionSerializer(submission).data, status=status.HTTP_201_CREATED)
 
@@ -552,6 +605,46 @@ class StudentMaterialDownloadView(APIView):
         return response
 
 
+class StudentAssignmentDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        assignment = get_object_or_404(
+            Assignment.objects.select_related('course_offering'),
+            pk=pk,
+        )
+        is_enrolled = Enrollment.objects.filter(
+            student=request.user,
+            course_offering=assignment.course_offering,
+            status=Enrollment.Status.ACTIVE,
+        ).exists()
+
+        if not is_enrolled:
+            return Response(
+                {'detail': 'You are not enrolled in this course.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not getattr(assignment, 'file', None):
+            return Response(
+                {'detail': 'No file is stored for this assignment.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        mime_type, _ = mimetypes.guess_type(assignment.file.name)
+        mime_type = mime_type or 'application/octet-stream'
+
+        response = FileResponse(
+            assignment.file.open('rb'),
+            content_type=mime_type,
+            as_attachment=False,
+        )
+        import os
+        filename = os.path.basename(assignment.file.name)
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
+
+
 class StudentSubmissionDownloadView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -562,6 +655,18 @@ class StudentSubmissionDownloadView(APIView):
             student=request.user,
         )
         file_path = submission.file_url
+        if getattr(submission, 'file', None):
+            mime_type, _ = mimetypes.guess_type(submission.file.name)
+            mime_type = mime_type or 'application/octet-stream'
+            response = FileResponse(
+                submission.file.open('rb'),
+                content_type=mime_type,
+                as_attachment=False,
+            )
+            import os
+            response['Content-Disposition'] = f'inline; filename="{os.path.basename(submission.file.name)}"'
+            return response
+            
         if not file_path:
             return Response(
                 {'detail': 'No file for this submission.'},
@@ -570,6 +675,7 @@ class StudentSubmissionDownloadView(APIView):
         # file_url is either /media/submissions/... or an external URL
         if file_path.startswith('/media/'):
             from django.conf import settings
+            import os
             full_path = os.path.join(str(settings.MEDIA_ROOT), file_path.replace('/media/', '').lstrip('/'))
             if not os.path.exists(full_path):
                 return Response(

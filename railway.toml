@@ -2,6 +2,7 @@
   builder = "nixpacks"
 
 [deploy]
-  startCommand = "gunicorn GraduationProject.wsgi:application --bind 0.0.0.0:$PORT --workers 4 --timeout 120"
+  # daphne serves both HTTP and WebSocket via the ASGI application
+  startCommand = "daphne -b 0.0.0.0 -p $PORT GraduationProject.asgi:application"
   preDeployCommand = "python manage.py migrate"
 

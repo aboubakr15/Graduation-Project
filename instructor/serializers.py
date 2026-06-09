@@ -30,7 +30,7 @@ class CourseOfferingListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = CourseOffering
-        fields = ['id', 'course', 'course_name', 'course_code', 'semester', 'year', 'instructor', 'instructor_name', 'capacity', 'enrolled_count', 'course_schedule', 'is_active']
+        fields = ['id', 'course', 'course_name', 'course_code', 'semester', 'year', 'instructor', 'instructor_name', 'capacity', 'enrolled_count', 'course_schedule', 'is_active', 'is_chat_active']
     
     def get_enrolled_count(self, obj):
         return obj.enrollments.filter(status=Enrollment.Status.ACTIVE).count()
@@ -48,7 +48,7 @@ class CourseOfferingDetailSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = CourseOffering
-        fields = ['id', 'course', 'course_name', 'course_code', 'semester', 'year', 'instructor', 'instructor_name', 'tas', 'capacity', 'enrolled_count', 'course_schedule', 'is_active', 'materials', 'assignments', 'enrolled_students']
+        fields = ['id', 'course', 'course_name', 'course_code', 'semester', 'year', 'instructor', 'instructor_name', 'tas', 'capacity', 'enrolled_count', 'course_schedule', 'is_active', 'is_chat_active', 'materials', 'assignments', 'enrolled_students']
     
     def get_tas(self, obj):
         return [{'id': ta.id, 'full_name': ta.full_name} for ta in obj.tas.all()]
@@ -78,7 +78,7 @@ class CourseOfferingDetailSerializer(serializers.ModelSerializer):
 class CourseOfferingCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CourseOffering
-        fields = ['course', 'semester', 'year', 'instructor', 'tas', 'capacity', 'course_schedule', 'is_active']
+        fields = ['course', 'semester', 'year', 'instructor', 'tas', 'capacity', 'course_schedule', 'is_active', 'is_chat_active']
 
 
 import os
@@ -207,32 +207,49 @@ class MaterialCreateSerializer(serializers.ModelSerializer):
 class AssignmentListSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
     submission_count = serializers.SerializerMethodField()
+    file_download_url = serializers.SerializerMethodField()
     
     class Meta:
         model = Assignment
-        fields = ['id', 'course_offering', 'course_name', 'title', 'description', 'due_date', 'total_points', 'assignment_type', 'submission_location', 'submission_count', 'created_at']
+        fields = ['id', 'course_offering', 'course_name', 'title', 'description', 'due_date', 'total_points', 'assignment_type', 'submission_location', 'submission_count', 'created_at', 'file_download_url']
     
     def get_submission_count(self, obj):
         return obj.submissions.count()
+
+    def get_file_download_url(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return None
+        if getattr(obj, 'file', None):
+            return request.build_absolute_uri(f'/api/professor/assignments/{obj.pk}/download/')
+        return None
 
 
 class AssignmentDetailSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course_offering.course.name', read_only=True)
     submissions = serializers.SerializerMethodField()
+    file_download_url = serializers.SerializerMethodField()
     
     class Meta:
         model = Assignment
-        fields = ['id', 'course_offering', 'course_name', 'title', 'description', 'description_material', 'is_auto_correctable', 'questions', 'due_date', 'total_points', 'assignment_type', 'submission_location', 'created_by', 'created_at', 'updated_at', 'submissions']
+        fields = ['id', 'course_offering', 'course_name', 'title', 'description', 'description_material', 'is_auto_correctable', 'questions', 'due_date', 'total_points', 'assignment_type', 'submission_location', 'created_by', 'created_at', 'updated_at', 'submissions', 'file_download_url']
     
     def get_submissions(self, obj):
         subs = obj.submissions.select_related('student').order_by('-submission_date')
         return SubmissionSerializer(subs, many=True).data
 
+    def get_file_download_url(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return None
+        if getattr(obj, 'file', None):
+            return request.build_absolute_uri(f'/api/professor/assignments/{obj.pk}/download/')
+        return None
 
 class AssignmentCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Assignment
-        fields = ['course_offering', 'title', 'description', 'description_material', 'is_auto_correctable', 'questions', 'due_date', 'total_points', 'assignment_type', 'submission_location']
+        fields = ['course_offering', 'title', 'description', 'description_material', 'is_auto_correctable', 'questions', 'due_date', 'total_points', 'assignment_type', 'submission_location', 'file']
 
 
 class SubmissionSerializer(serializers.ModelSerializer):
@@ -244,12 +261,14 @@ class SubmissionSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = StudentSubmission
-        fields = ['id', 'assignment', 'assignment_title', 'course_name', 'student', 'student_name', 'student_email', 'submission_date', 'file_url', 'file_download_url', 'student_answers', 'status', 'grade', 'notes']
+        fields = ['id', 'assignment', 'assignment_title', 'course_name', 'student', 'student_name', 'student_email', 'submission_date', 'file_url', 'file_download_url', 'student_answers', 'submitted_text', 'status', 'grade', 'notes']
     
     def get_file_download_url(self, obj):
         request = self.context.get('request')
         if not request:
             return None
+        if getattr(obj, 'file', None):
+            return request.build_absolute_uri(f'/api/professor/submissions/{obj.pk}/download/')
         if obj.file_url and obj.file_url.startswith('/media/'):
             return request.build_absolute_uri(f'/api/professor/submissions/{obj.pk}/download/')
         return obj.file_url or None
@@ -399,3 +418,13 @@ class CourseCreateUploadSerializer(serializers.Serializer):
             )
 
         return uploaded_file
+
+
+class CourseChatMessageSerializer(serializers.ModelSerializer):
+    """Serializer for CourseChatMessage — used for the HTTP REST fallback and initial load."""
+
+    class Meta:
+        from main.models import CourseChatMessage
+        model = CourseChatMessage
+        fields = ['id', 'sender_id', 'sender_name', 'sender_role', 'content', 'created_at']
+        read_only_fields = ['id', 'sender_id', 'sender_name', 'sender_role', 'created_at']

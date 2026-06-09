@@ -27,15 +27,20 @@ class EmailTokenObtainPairView(TokenObtainPairView):
 
     def _update_streak(self, user):
         now = timezone.now()
+        today = now.date()
+        
         if user.last_login is None:
             user.current_streak = 1
         else:
-            time_since = now - user.last_login
-            if time_since < timedelta(hours=24):
-                return
-            elif time_since < timedelta(hours=48):
+            last_login_date = user.last_login.date()
+            if last_login_date == today:
+                # Already logged in today, keep the same streak
+                pass
+            elif last_login_date == today - timedelta(days=1):
+                # Logged in yesterday, increment streak
                 user.current_streak += 1
             else:
+                # Missed a day, reset streak
                 user.current_streak = 1
 
         if user.current_streak > user.longest_streak:

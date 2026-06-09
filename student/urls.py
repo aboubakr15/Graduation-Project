@@ -18,19 +18,23 @@ from .views import (
     StudentNotificationsView,
     StudentMaterialDownloadView,
     StudentSubmissionDownloadView,
+    StudentAssignmentDownloadView,
     # Rubric-Driven Auto Revision Engine
     StudentRubricSubmitView,
     StudentGradingResultListView,
     StudentGradingResultDetailView,
+    StudentCourseChatListView,
 )
 
 urlpatterns = [
     path('dashboard/', StudentDashboardView.as_view(), name='student-dashboard'),
     path('courses/', StudentCourseListView.as_view(), name='student-course-list'),
     path('courses/<int:pk>/', StudentCourseDetailView.as_view(), name='student-course-detail'),
+    path('courses/<int:pk>/chat/', StudentCourseChatListView.as_view(), name='student-course-chat'),
     path('enrollments/', StudentEnrollmentView.as_view(), name='student-enrollments'),
     path('enrollments/<int:pk>/', StudentEnrollmentView.as_view(), name='student-enrollment-detail'),
     path('assignments/', StudentAssignmentListView.as_view(), name='student-assignments'),
+    path('assignments/<int:pk>/download/', StudentAssignmentDownloadView.as_view(), name='student-assignment-download'),
     path('submissions/', StudentSubmissionView.as_view(), name='student-submissions'),
     path('grades/', StudentGradesView.as_view(), name='student-grades'),
     path('notifications/', StudentNotificationsView.as_view(), name='student-notifications'),

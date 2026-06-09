@@ -138,6 +138,7 @@ class CourseOffering(models.Model):
     enrollment_count = models.IntegerField(default=0)
     course_schedule = models.JSONField(default=list, blank=True)  # [{"day": "Monday", "time": "10:00-11:30"}, ...]
     is_active = models.BooleanField(default=True)
+    is_chat_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -229,6 +230,7 @@ class Assignment(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     description_material = models.ForeignKey(CourseMaterial, on_delete=models.SET_NULL, null=True, blank=True, related_name='related_assignments')
+    file = models.FileField(upload_to='assignments/%Y/%m/', null=True, blank=True)
 
     # if auto correctable, store questions and model answers as JSON
     is_auto_correctable = models.BooleanField(default=False)
@@ -295,6 +297,7 @@ class StudentSubmission(models.Model):
     student = models.ForeignKey(User, on_delete=models.CASCADE,related_name='submissions', limit_choices_to={'primary_role': User.Role.STUDENT})
     submission_date = models.DateTimeField(auto_now_add=True)
     file_url = models.URLField(null=True, blank=True)
+    file = models.FileField(upload_to='submissions/%Y/%m/', null=True, blank=True)
     student_answers = models.JSONField(default=dict, blank=True)
     # ── Rubric-Driven Auto Revision Engine ──────────────────────────────
     # Free-text or code content for rubric-based AI grading.
@@ -497,4 +500,40 @@ class SemesterGPA(models.Model):
     
     def __str__(self):
         return f"{self.student.full_name} - {self.semester} {self.year}: {self.gpa}"
+
+
+class CourseChatMessage(models.Model):
+    """
+    A real-time group chat message for a course offering.
+    Used by the WebSocket course chat feature (WhatsApp-style group chat).
+    All enrolled students, TAs, and the instructor can read and post messages.
+    """
+    course_offering = models.ForeignKey(
+        CourseOffering,
+        on_delete=models.CASCADE,
+        related_name='chat_messages',
+    )
+    sender = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='course_chat_messages',
+    )
+    # Snapshot the sender's role so the frontend can style messages correctly
+    # without an extra DB join on every query.
+    sender_role = models.CharField(max_length=20, default='STUDENT')
+    sender_name = models.CharField(max_length=255, default='')
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'course_chat_messages'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['course_offering', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.sender_name} in {self.course_offering}: {self.content[:50]}"
+
 

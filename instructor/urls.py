@@ -10,6 +10,7 @@ from .views import (
     MaterialDownloadView,
     AssignmentListView,
     AssignmentDetailView,
+    AssignmentDownloadView,
     SubmissionListView,
     SubmissionGradeView,
     SubmissionDownloadView,
@@ -26,6 +27,7 @@ from .views import (
     RubricAssignmentDetailView,
     RegradeSubmissionView,
     InstructorGradingResultView,
+    CourseChatListView,
 )
 
 urlpatterns = [
@@ -39,6 +41,7 @@ urlpatterns = [
     # Course Offerings
     path('courses/', CourseOfferingListView.as_view(), name='instructor-courses'),
     path('courses/<int:pk>/', CourseOfferingDetailView.as_view(), name='instructor-course-detail'),
+    path('courses/<int:pk>/chat/', CourseChatListView.as_view(), name='instructor-course-chat'),
     
     # Materials
     path('materials/', MaterialListView.as_view(), name='instructor-materials'),
@@ -48,6 +51,7 @@ urlpatterns = [
     # Assignments
     path('assignments/', AssignmentListView.as_view(), name='instructor-assignments'),
     path('assignments/<int:pk>/', AssignmentDetailView.as_view(), name='instructor-assignment-detail'),
+    path('assignments/<int:pk>/download/', AssignmentDownloadView.as_view(), name='instructor-assignment-download'),
     
     # Submissions
     path('submissions/', SubmissionListView.as_view(), name='instructor-submissions'),
