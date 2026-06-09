@@ -75,9 +75,14 @@ class UserSerializer(serializers.ModelSerializer):
             "department",
             "department_details",
             "profile_picture_url",
+            "gender",
+            "student_current_level",
             "password",
         ]
-        extra_kwargs = {"password": {"write_only": True, "required": False}}
+        extra_kwargs = {
+            "password": {"write_only": True, "required": False},
+            "primary_role": {"required": False},
+        }
 
 
 class AnnouncementSerializer(serializers.ModelSerializer):

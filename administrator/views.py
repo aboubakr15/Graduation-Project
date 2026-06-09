@@ -75,6 +75,7 @@ class CourseViewSet(viewsets.ModelViewSet):
 class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminOnly]
     serializer_class = UserSerializer
+    lookup_value_regex = r"\d+"
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["primary_role"]
 
@@ -103,6 +104,13 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = AdminUserService.create_user(serializer.validated_data, User.Role.TA)
+        return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="students")
+    def create_student(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = AdminUserService.create_user(serializer.validated_data, User.Role.STUDENT)
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
 
 
