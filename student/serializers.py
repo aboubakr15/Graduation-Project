@@ -136,7 +136,7 @@ class MaterialSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CourseMaterial
-        fields = ['id', 'title', 'description', 'material_type', 'file_download_url', 'is_visible_to_students']
+        fields = ['id', 'title', 'description', 'material_type', 'file_download_url', 'file_type', 'is_visible_to_students']
 
     def get_file_download_url(self, obj):
         request = self.context.get('request')
@@ -147,33 +147,46 @@ class MaterialSerializer(serializers.ModelSerializer):
         return None
 
 class AssignmentSerializer(serializers.ModelSerializer):
-    status = serializers.SerializerMethodField()
+    submitted = serializers.SerializerMethodField()
 
     class Meta:
         model = Assignment
-        fields = ['id', 'title', 'description', 'due_date', 'total_points', 'status']
+        fields = ['id', 'title', 'description', 'due_date', 'total_points', 'submitted']
 
-    def get_status(self, obj):
-        # Check if student submitted
-        user = self.context.get('request').user
-        # This requires the view to pass context={'request': request}
-        # For now, return a placeholder if context is missing
-        return "Pending"
+    def get_submitted(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return False
+        return StudentSubmission.objects.filter(
+            assignment=obj, student=request.user
+        ).exists()
 
 class CourseDetailSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name')
     course_code = serializers.CharField(source='course.code')
     instructor_name = serializers.CharField(source='instructor.full_name')
+    tas_names = serializers.SerializerMethodField()
+    enrollment_status = serializers.SerializerMethodField()
     materials = serializers.SerializerMethodField()
     assignments = AssignmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = CourseOffering
-        fields = ['id', 'course_name', 'course_code', 'instructor_name', 'materials', 'assignments']
+        fields = ['id', 'course_name', 'course_code', 'semester', 'year', 'instructor_name', 'tas_names', 'enrollment_status', 'materials', 'assignments']
 
     def get_materials(self, obj):
         mats = CourseMaterial.objects.filter(course_offering=obj, is_visible_to_students=True)
         return MaterialSerializer(mats, many=True, context=self.context).data
+
+    def get_tas_names(self, obj):
+        return list(obj.tas.values_list('full_name', flat=True))
+
+    def get_enrollment_status(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return None
+        enrollment = Enrollment.objects.filter(student=request.user, course_offering=obj).first()
+        return enrollment.status if enrollment else None
 
 class ToDoItemSerializer(serializers.ModelSerializer):
     course_name = serializers.SerializerMethodField()
