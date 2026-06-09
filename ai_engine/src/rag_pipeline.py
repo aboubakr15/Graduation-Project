@@ -166,6 +166,14 @@ class RAGPipeline:
         
         # YouTube Processing
         youtube_data = self.youtube_processor.process_url(question)
+        if not youtube_data and history:
+            for msg in reversed(history):
+                if msg["role"] == "user":
+                    youtube_data = self.youtube_processor.process_url(msg["content"])
+                    if youtube_data:
+                        logger.info("Found YouTube URL in conversation history.")
+                        break
+                        
         video_meta = {"title": youtube_data.get("title"), "duration": youtube_data.get("duration")} if youtube_data else None
 
         # -----------------------------------------------------------------

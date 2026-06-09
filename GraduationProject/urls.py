@@ -1,5 +1,8 @@
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
+from django.views.static import serve
+from django.conf import settings
+import os
 from rest_framework_simplejwt.views import (
     TokenRefreshView,
     TokenBlacklistView,
@@ -25,4 +28,9 @@ urlpatterns = [
     path('api/token/', EmailTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/token/blacklist/', TokenBlacklistView.as_view(), name='token_blacklist'),
+
+    # Serve generated presentations
+    re_path(r'^presentations/(?P<path>.*)$', serve, {
+        'document_root': os.path.join(settings.BASE_DIR, 'presentations'),
+    }),
 ]
