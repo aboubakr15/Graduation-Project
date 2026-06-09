@@ -75,6 +75,10 @@ class InstructorDashboardView(APIView):
         recent_announcements = Announcement.objects.filter(
             course_offering__in=courses
         ).order_by('-created_at')[:5]
+
+        portal_announcements = Announcement.objects.filter(
+            is_global=True, author__primary_role=User.Role.ADMIN
+        ).order_by('-created_at')[:3]
         
         data = {
             'total_courses': total_courses,
@@ -82,6 +86,7 @@ class InstructorDashboardView(APIView):
             'pending_submissions': pending_submissions,
             'upcoming_assignments': upcoming_assignments,
             'recent_announcements': AnnouncementSerializer(recent_announcements, many=True).data,
+            'portal_announcements': AnnouncementSerializer(portal_announcements, many=True).data,
             'courses': CourseOfferingListSerializer(courses[:5], many=True).data
         }
         return Response(data)

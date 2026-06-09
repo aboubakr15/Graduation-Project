@@ -5,11 +5,55 @@ from main.models import (
 )
 from django.db.models import Sum
 
+def percentage_to_grade_point(pct):
+    if pct is None:
+        return 0.0
+    if pct >= 90:
+        return 4.0
+    elif pct >= 85:
+        return 3.7
+    elif pct >= 80:
+        return 3.3
+    elif pct >= 77:
+        return 2.7
+    elif pct >= 73:
+        return 2.3
+    elif pct >= 70:
+        return 2.0
+    elif pct >= 67:
+        return 1.7
+    elif pct >= 63:
+        return 1.3
+    elif pct >= 60:
+        return 1.0
+    else:
+        return 0.0
+
+def compute_cumulative_gpa(student):
+    enrollments = Enrollment.objects.filter(
+        student=student,
+        status=Enrollment.Status.COMPLETED,
+        grade__isnull=False
+    ).select_related('course_offering__course')
+    total_quality_points = 0.0
+    total_credits = 0
+    for enrollment in enrollments:
+        pct = float(enrollment.grade)
+        grade_point = percentage_to_grade_point(pct)
+        credits = enrollment.course_offering.course.credit_hours
+        total_quality_points += grade_point * credits
+        total_credits += credits
+    if total_credits == 0:
+        return 0.0
+    gpa = round(total_quality_points / total_credits, 2)
+    return min(gpa, 4.0)
+
 class StudentProfileSerializer(serializers.ModelSerializer):
     enrolled_hours = serializers.SerializerMethodField()
     daily_streak_mock = serializers.SerializerMethodField()
     grades = serializers.SerializerMethodField()
     department_name = serializers.SerializerMethodField()
+    current_gpa = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -18,6 +62,9 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             'student_current_level', 'current_streak', 'profile_picture_url', 'enrolled_hours',
             'daily_streak_mock', 'grades'
         ]
+
+    def get_current_gpa(self, obj):
+        return compute_cumulative_gpa(obj)
 
     def get_enrolled_hours(self, obj):
         # Calculate total credit hours for active enrollments

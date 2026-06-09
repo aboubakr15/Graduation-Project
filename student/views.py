@@ -4,7 +4,7 @@ import re
 import uuid
 import mimetypes
 from rest_framework.views import APIView
-from rest_framework.generics import ListAPIView, RetrieveAPIView, ListCreateAPIView, RetrieveUpdateAPIView
+from rest_framework.generics import ListAPIView, RetrieveAPIView, ListCreateAPIView, RetrieveUpdateAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
@@ -127,6 +127,13 @@ class StudentToDoListView(ListCreateAPIView):
 
     def perform_create(self, serializer):
         serializer.save(student=self.request.user)
+
+class StudentToDoDetailView(RetrieveUpdateDestroyAPIView):
+    serializer_class = ToDoItemSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return TodoItem.objects.filter(student=self.request.user)
 
 class StudentProfileView(APIView):
     permission_classes = [IsAuthenticated]
