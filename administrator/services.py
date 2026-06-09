@@ -23,7 +23,11 @@ class AdminDashboardService:
         total_doctors = User.objects.filter(primary_role=User.Role.PROFESSOR).count()
         total_tas = User.objects.filter(primary_role=User.Role.TA).count()
 
-        gender_stats = User.objects.values("gender").annotate(count=Count("gender"))
+        gender_stats = (
+            User.objects.filter(primary_role=User.Role.STUDENT)
+            .values("gender")
+            .annotate(count=Count("gender"))
+        )
         total_users = sum(item["count"] for item in gender_stats)
         male_count = next(
             (item["count"] for item in gender_stats if item["gender"] == User.Gender.MALE),

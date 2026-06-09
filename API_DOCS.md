@@ -1,7 +1,7 @@
 # API Documentation
 
-> **Version**: 1.1  
-> **Last Updated**: April 2026
+> **Version**: 1.2  
+> **Last Updated**: June 2026
 
 This document outlines all API endpoints for the Graduation Project.
 
@@ -23,7 +23,7 @@ This document outlines all API endpoints for the Graduation Project.
 | Environment | URL |
 |-------------|-----|
 | Development | `http://127.0.0.1:8000` |
-| Production | `https://graduation-project-production-be44.up.railway.app` |
+| Production | `https://eduera-backend-production.up.railway.app` |
 
 ---
 
@@ -182,9 +182,16 @@ Returns success status (empty body).
     "gender_distribution": {
         "male_percentage": 55.5,
         "female_percentage": 44.5
+    },
+    "students_per_department": {
+        "Computer Science": 45,
+        "Mathematics": 30,
+        "Physics": 25
     }
 }
 ```
+
+> **Note**: `gender_distribution` percentages are calculated **among students only** (instructors/TAs/admins are excluded).
 
 ---
 
@@ -507,6 +514,63 @@ Returns success status (empty body).
 #### Request Body
 
 Same as instructor.
+
+---
+
+### Create Student
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/admin/users/students/` |
+| **Method** | `POST` |
+
+#### Request Body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `username` | string | No | Username (auto-generated from email if omitted) |
+| `email` | string | Yes | Email address |
+| `password` | string | Yes | Password |
+| `full_name` | string | Yes | Full name |
+| `department` | int | No | Department ID |
+| `gender` | string | No | Gender (`M` or `F`) |
+| `student_current_level` | int | No | Academic level (1-5) |
+
+> **Note**: `primary_role` is automatically set to `STUDENT` on the backend.
+
+---
+
+### Update User
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/admin/users/{id}/` |
+| **Method** | `PATCH` |
+
+#### Request Body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `full_name` | string | No | Full name |
+| `email` | string | No | Email address |
+| `password` | string | No | Password (leave empty to keep current) |
+| `department` | int | No | Department ID |
+| `is_active` | bool | No | Soft-delete: set to `false` to deactivate |
+| `gender` | string | No | Gender (`M` or `F`) |
+| `student_current_level` | int | No | Academic level (1-5) |
+
+> **Soft delete pattern**: To remove a user from the UI, send `PATCH /admin/users/{id}/` with `{"is_active": false}`. The record stays in the DB but is filtered out by the frontend.
+
+---
+
+### Delete User (hard delete)
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/admin/users/{id}/` |
+| **Method** | `DELETE` |
+
+> **Warning**: Permanently removes the user. Prefer soft delete (`PATCH` with `is_active: false`) in most cases.
 
 ---
 
