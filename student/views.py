@@ -388,6 +388,58 @@ class StudentConversationDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class StudentCourseChatListView(APIView):
+    """
+    GET  /api/student/courses/<id>/chat/  — Return the last 100 messages for the course.
+    POST /api/student/courses/<id>/chat/  — Send a new message to the course chat.
+
+    Access: Students actively enrolled in the course only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _check_enrollment(self, user, course_id):
+        """Return the CourseOffering if user is enrolled (ACTIVE), else None."""
+        offering = get_object_or_404(CourseOffering, pk=course_id)
+        enrolled = Enrollment.objects.filter(
+            student=user,
+            course_offering=offering,
+            status=Enrollment.Status.ACTIVE,
+        ).exists()
+        return offering if enrolled else None
+
+    def get(self, request, pk):
+        """Return last 100 messages chronologically for the course."""
+        from main.models import CourseChatMessage
+        from instructor.serializers import CourseChatMessageSerializer
+        offering = self._check_enrollment(request.user, pk)
+        if offering is None:
+            return Response({'detail': 'You are not enrolled in this course.'}, status=status.HTTP_403_FORBIDDEN)
+
+        msgs = CourseChatMessage.objects.filter(
+            course_offering=offering
+        ).order_by('created_at').select_related('sender')[:100]
+        return Response(CourseChatMessageSerializer(msgs, many=True).data)
+
+    def post(self, request, pk):
+        """Send a new message to the course group chat."""
+        from main.models import CourseChatMessage
+        from instructor.serializers import CourseChatMessageSerializer
+        offering = self._check_enrollment(request.user, pk)
+        if offering is None:
+            return Response({'detail': 'You are not enrolled in this course.'}, status=status.HTTP_403_FORBIDDEN)
+
+        content = (request.data.get('content') or '').strip()
+        if not content:
+            return Response({'detail': 'content is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        msg = CourseChatMessage.objects.create(
+            course_offering=offering,
+            sender=request.user,
+            sender_name=request.user.full_name,
+            sender_role=request.user.primary_role,
+            content=content,
+        )
+        return Response(CourseChatMessageSerializer(msg).data, status=status.HTTP_201_CREATED)
 
 
 class StudentEnrollmentView(APIView):

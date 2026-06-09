@@ -667,32 +667,43 @@ class SubmissionGradeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        """Grade a student submission. Saves grade first, then updates enrollment average."""
         submission = get_object_or_404(StudentSubmission, pk=pk)
         serializer = GradeSubmissionSerializer(data=request.data)
-        
-        if serializer.is_valid():
-            grade = serializer.validated_data['grade']
-            notes = serializer.validated_data.get('notes', '')
-            
-            submission.grade = grade
-            submission.notes = notes
-            submission.status = StudentSubmission.Status.GRADED
-            submission.save()
-            
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        grade = serializer.validated_data['grade']
+        notes = serializer.validated_data.get('notes', '')
+
+        # Always save the core grade first — enrollment update is best-effort
+        submission.grade = grade
+        submission.notes = notes
+        submission.status = StudentSubmission.Status.GRADED
+        submission.save()
+
+        try:
             enrollment = Enrollment.objects.filter(
                 student=submission.student,
                 course_offering=submission.assignment.course_offering
             ).first()
             if enrollment:
                 self._update_enrollment_grade(enrollment)
-            
-            return Response(SubmissionSerializer(submission, context={'request': request}).data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+        except Exception as e:
+            logger.warning(f'Enrollment grade update failed for submission #{pk}: {e}')
+            # Grade was already saved — don't fail the whole request
+
+        return Response(
+            SubmissionSerializer(submission, context={'request': request}).data,
+            status=status.HTTP_200_OK
+        )
+
     def _update_enrollment_grade(self, enrollment):
+        """Recalculate and persist the weighted enrollment grade."""
         assignments = Assignment.objects.filter(course_offering=enrollment.course_offering)
-        total_points = sum(a.total_points for a in assignments)
-        
+        total_points = sum(float(a.total_points) for a in assignments)
+
         if total_points > 0:
             submissions = StudentSubmission.objects.filter(
                 student=enrollment.student,
@@ -1104,6 +1115,59 @@ class NotificationListView(APIView):
         notification.is_read = request.data.get('is_read', notification.is_read)
         notification.save()
         return Response(NotificationSerializer(notification).data)
+
+
+class CourseChatListView(APIView):
+    """
+    GET  /api/professor/courses/<id>/chat/  — Return the last 100 messages for the course.
+    POST /api/professor/courses/<id>/chat/  — Post a new message to the course chat.
+
+    Access: Instructor or TA of the course only.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _get_offering_or_403(self, request, pk):
+        """Return the offering if the requester is instructor/TA, else None."""
+        offering = get_object_or_404(CourseOffering, pk=pk)
+        user = request.user
+        if offering.instructor_id == user.pk or offering.tas.filter(pk=user.pk).exists():
+            return offering
+        return None
+
+    def get(self, request, pk):
+        """Return last 100 messages chronologically."""
+        from main.models import CourseChatMessage
+        from .serializers import CourseChatMessageSerializer
+        offering = self._get_offering_or_403(request, pk)
+        if offering is None:
+            return Response({'detail': 'Access denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        msgs = CourseChatMessage.objects.filter(
+            course_offering=offering
+        ).order_by('created_at').select_related('sender')[:100]
+        return Response(CourseChatMessageSerializer(msgs, many=True).data)
+
+    def post(self, request, pk):
+        """Post a new message from the instructor/TA."""
+        from main.models import CourseChatMessage
+        from .serializers import CourseChatMessageSerializer
+        offering = self._get_offering_or_403(request, pk)
+        if offering is None:
+            return Response({'detail': 'Access denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        content = (request.data.get('content') or '').strip()
+        if not content:
+            return Response({'detail': 'content is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        msg = CourseChatMessage.objects.create(
+            course_offering=offering,
+            sender=request.user,
+            sender_name=request.user.full_name,
+            sender_role=request.user.primary_role,
+            content=content,
+        )
+        return Response(CourseChatMessageSerializer(msg).data, status=status.HTTP_201_CREATED)
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════

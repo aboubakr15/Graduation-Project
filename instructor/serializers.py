@@ -418,3 +418,13 @@ class CourseCreateUploadSerializer(serializers.Serializer):
             )
 
         return uploaded_file
+
+
+class CourseChatMessageSerializer(serializers.ModelSerializer):
+    """Serializer for CourseChatMessage — used for the HTTP REST fallback and initial load."""
+
+    class Meta:
+        from main.models import CourseChatMessage
+        model = CourseChatMessage
+        fields = ['id', 'sender_id', 'sender_name', 'sender_role', 'content', 'created_at']
+        read_only_fields = ['id', 'sender_id', 'sender_name', 'sender_role', 'created_at']

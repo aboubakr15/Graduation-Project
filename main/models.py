@@ -500,3 +500,39 @@ class SemesterGPA(models.Model):
     def __str__(self):
         return f"{self.student.full_name} - {self.semester} {self.year}: {self.gpa}"
 
+
+class CourseChatMessage(models.Model):
+    """
+    A real-time group chat message for a course offering.
+    Used by the WebSocket course chat feature (WhatsApp-style group chat).
+    All enrolled students, TAs, and the instructor can read and post messages.
+    """
+    course_offering = models.ForeignKey(
+        CourseOffering,
+        on_delete=models.CASCADE,
+        related_name='chat_messages',
+    )
+    sender = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='course_chat_messages',
+    )
+    # Snapshot the sender's role so the frontend can style messages correctly
+    # without an extra DB join on every query.
+    sender_role = models.CharField(max_length=20, default='STUDENT')
+    sender_name = models.CharField(max_length=255, default='')
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'course_chat_messages'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['course_offering', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.sender_name} in {self.course_offering}: {self.content[:50]}"
+
+
