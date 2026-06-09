@@ -243,7 +243,7 @@ class SubmissionSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = StudentSubmission
-        fields = ['id', 'assignment', 'assignment_title', 'course_name', 'student', 'student_name', 'student_email', 'submission_date', 'file_url', 'student_answers', 'status', 'notes']
+        fields = ['id', 'assignment', 'assignment_title', 'course_name', 'student', 'student_name', 'student_email', 'submission_date', 'file_url', 'student_answers', 'status', 'grade', 'notes']
 
 
 class GradeSubmissionSerializer(serializers.Serializer):
