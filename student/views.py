@@ -141,8 +141,6 @@ class StudentProfileView(APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-from ai_engine.ai_services import get_rag_pipeline
-
 class StudentChatBotView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -237,7 +235,9 @@ class StudentChatBotView(APIView):
                 enrolled_course_codes.append(' '.join(words[:i]))
             
         try:
+            from ai_engine.ai_services import get_rag_pipeline
             rag = get_rag_pipeline()
+
             ai_result = rag.query(
                 question=content,
                 history=history,
