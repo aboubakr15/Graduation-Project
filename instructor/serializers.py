@@ -240,10 +240,19 @@ class SubmissionSerializer(serializers.ModelSerializer):
     student_email = serializers.CharField(source='student.email', read_only=True)
     assignment_title = serializers.CharField(source='assignment.title', read_only=True)
     course_name = serializers.CharField(source='assignment.course_offering.course.name', read_only=True)
+    file_download_url = serializers.SerializerMethodField()
     
     class Meta:
         model = StudentSubmission
-        fields = ['id', 'assignment', 'assignment_title', 'course_name', 'student', 'student_name', 'student_email', 'submission_date', 'file_url', 'student_answers', 'status', 'grade', 'notes']
+        fields = ['id', 'assignment', 'assignment_title', 'course_name', 'student', 'student_name', 'student_email', 'submission_date', 'file_url', 'file_download_url', 'student_answers', 'status', 'grade', 'notes']
+    
+    def get_file_download_url(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return None
+        if obj.file_url and obj.file_url.startswith('/media/'):
+            return request.build_absolute_uri(f'/api/professor/submissions/{obj.pk}/download/')
+        return obj.file_url or None
 
 
 class GradeSubmissionSerializer(serializers.Serializer):

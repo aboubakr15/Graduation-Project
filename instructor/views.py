@@ -620,7 +620,7 @@ class SubmissionListView(APIView):
             )
         
         submissions = submissions.select_related('student', 'assignment__course_offering__course')
-        serializer = SubmissionSerializer(submissions.order_by('-submission_date'), many=True)
+        serializer = SubmissionSerializer(submissions.order_by('-submission_date'), many=True, context={'request': request})
         return Response(serializer.data)
 
 
@@ -647,7 +647,7 @@ class SubmissionGradeView(APIView):
             if enrollment:
                 self._update_enrollment_grade(enrollment)
             
-            return Response(SubmissionSerializer(submission).data)
+            return Response(SubmissionSerializer(submission, context={'request': request}).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     def _update_enrollment_grade(self, enrollment):
@@ -663,6 +663,50 @@ class SubmissionGradeView(APIView):
             earned_points = sum(float(s.grade or 0) for s in submissions)
             enrollment.grade = (earned_points / total_points) * 100
             enrollment.save()
+
+
+class SubmissionDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        submission = get_object_or_404(
+            StudentSubmission.objects.select_related('assignment__course_offering'),
+            pk=pk,
+        )
+        offering = submission.assignment.course_offering
+        user = request.user
+        is_instructor = (offering.instructor_id == user.pk)
+        is_ta = offering.tas.filter(pk=user.pk).exists()
+        if not (is_instructor or is_ta):
+            return Response(
+                {'detail': 'You do not have access to this submission.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        file_path = submission.file_url
+        if not file_path:
+            return Response(
+                {'detail': 'No file for this submission.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if file_path.startswith('/media/'):
+            from django.conf import settings
+            full_path = os.path.join(str(settings.MEDIA_ROOT), file_path.replace('/media/', '').lstrip('/'))
+            if not os.path.exists(full_path):
+                return Response(
+                    {'detail': 'File not found on server.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            mime_type, _ = mimetypes.guess_type(full_path)
+            mime_type = mime_type or 'application/octet-stream'
+            response = FileResponse(
+                open(full_path, 'rb'),
+                content_type=mime_type,
+                as_attachment=False,
+            )
+            response['Content-Disposition'] = f'inline; filename="{os.path.basename(full_path)}"'
+            return response
+        from django.shortcuts import redirect
+        return redirect(file_path)
 
 
 class StudentListView(APIView):
