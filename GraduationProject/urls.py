@@ -7,7 +7,14 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
     TokenBlacklistView,
 )
-from main.views import EmailTokenObtainPairView
+from main.views import (
+    EmailTokenObtainPairView,
+    ChangePasswordView,
+    ForgotPasswordView,
+    ResetPasswordView,
+    NotificationListView,
+    NotificationMarkReadView,
+)
 
 urlpatterns = [
     # Remap default Django admin
@@ -28,6 +35,14 @@ urlpatterns = [
     path('api/token/', EmailTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/token/blacklist/', TokenBlacklistView.as_view(), name='token_blacklist'),
+
+    path('api/auth/change-password/', ChangePasswordView.as_view(), name='change_password'),
+    path('api/auth/forgot-password/', ForgotPasswordView.as_view(), name='forgot_password'),
+    path('api/auth/reset-password/', ResetPasswordView.as_view(), name='reset_password'),
+
+    path('api/notifications/', NotificationListView.as_view(), name='notifications_list'),
+    path('api/notifications/mark-read/', NotificationMarkReadView.as_view(), name='notifications_mark_read_all'),
+    path('api/notifications/<int:pk>/mark-read/', NotificationMarkReadView.as_view(), name='notifications_mark_read_one'),
 
     # Serve generated presentations
     re_path(r'^presentations/(?P<path>.*)$', serve, {

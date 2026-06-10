@@ -70,6 +70,24 @@ class StudentDashboardView(APIView):
         course_offerings = [e.course_offering for e in enrollments]
         return CourseProgressSerializer(course_offerings, many=True).data
 
+class StudentAnnouncementListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .serializers import AnnouncementSerializer
+        # Get global announcements
+        global_anns = Announcement.objects.filter(is_global=True, author__primary_role=User.Role.ADMIN)
+        # Get course announcements
+        enrolled_course_ids = Enrollment.objects.filter(
+            student=request.user, status=Enrollment.Status.ACTIVE
+        ).values_list('course_offering_id', flat=True)
+        course_anns = Announcement.objects.filter(course_offering_id__in=enrolled_course_ids)
+        
+        # Combine and sort
+        all_anns = (global_anns | course_anns).order_by('-created_at')
+        serializer = AnnouncementSerializer(all_anns, many=True)
+        return Response(serializer.data)
+
 class StudentCourseListView(APIView):
     permission_classes = [IsAuthenticated]
 

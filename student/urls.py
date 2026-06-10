@@ -24,10 +24,12 @@ from .views import (
     StudentGradingResultListView,
     StudentGradingResultDetailView,
     StudentCourseChatListView,
+    StudentAnnouncementListView,
 )
 
 urlpatterns = [
     path('dashboard/', StudentDashboardView.as_view(), name='student-dashboard'),
+    path('announcements/', StudentAnnouncementListView.as_view(), name='student-announcements'),
     path('courses/', StudentCourseListView.as_view(), name='student-course-list'),
     path('courses/<int:pk>/', StudentCourseDetailView.as_view(), name='student-course-detail'),
     path('courses/<int:pk>/chat/', StudentCourseChatListView.as_view(), name='student-course-chat'),
