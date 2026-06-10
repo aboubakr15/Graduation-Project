@@ -731,11 +731,16 @@ Question: {question}"""
 Analyze the user's latest question in the context of their chat history (if any).
 Classify the user's intent into EXACTLY ONE of the following categories:
 
-- "create_presentation": The user wants to CREATE A BRAND NEW presentation from scratch (e.g., "create a presentation about AI", "make slides for machine learning"). Use this ONLY when there is NO existing blueprint in the chat history.
+- "create_presentation": The user wants to CREATE A BRAND NEW presentation / slides / slideshow from scratch (e.g., "create a presentation about AI", "make slides for machine learning"). Use this ONLY when there is NO existing blueprint in the chat history.
 - "adjust_presentation": The user is asking to modify, add, remove, or change slides in an ALREADY EXISTING presentation blueprint in the chat history.
 - "approve_presentation": The user wants to FINALIZE and DOWNLOAD the existing blueprint that was already shown to them. This includes phrases like: "looks good", "perfect", "generate it", "create it", "build it", "ok go ahead", "yes do it", "make the presentation", "download it" — when there IS an existing blueprint in the chat history.
 - "recommendation": The user is asking for external resources, YouTube videos, or course recommendations to learn more.
-- "general_question": A normal academic question, asking for an explanation, summary, or asking the bot to "go over slides" / "explain these slides". (This is NOT creating a presentation).
+- "general_question": A normal academic question, asking for an explanation, summary, quiz, questions, practice problems, or asking the bot to "go over slides" / "explain these slides". (This is NOT creating a presentation).
+
+CRITICAL ANTI-HALLUCINATION RULES:
+1. Generating QUIZ questions or practice questions (e.g., "give me 5 questions about X", "generate a quiz", "test me on", "ask me questions about") MUST ALWAYS be classified as "general_question". It is NOT a presentation request. NEVER classify quiz/test requests as "create_presentation".
+2. "generate it" / "create it" / "make it" ONLY means "approve_presentation" if a blueprint (marked with <!-- slide --> or # Thank You) ALREADY EXISTS in the chat history. If there is no blueprint, treat it as "create_presentation" or "general_question" based on context.
+3. Asking for an explanation, definition, or summary is ALWAYS "general_question".
 
 IMPORTANT RULE: If the chat history already contains a presentation blueprint (marked with <!-- slide --> or # Thank You), then:
   - "generate it" / "create it" / "make it" = "approve_presentation" (finalize the existing one)
