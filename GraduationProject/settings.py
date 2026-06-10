@@ -250,10 +250,7 @@ if redis_url:
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
             'CONFIG': {
-                "hosts": [redis_url],
-                "health_check_interval": 20,
-                "socket_connect_timeout": 5,
-                "socket_keepalive": True,
+                "hosts": [f"{redis_url}{'&' if '?' in redis_url else '?'}health_check_interval=20"],
             },
         },
     }
