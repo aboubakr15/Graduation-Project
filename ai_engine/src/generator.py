@@ -233,8 +233,11 @@ OUTPUT FORMAT — FOLLOW EXACTLY:
 {user_request}
 
 CRITICAL INSTRUCTION FOR THIS REQUEST:
-If the [USER REQUEST] asks you to put specific questions or items from the [CONVERSATION CONTEXT] into a presentation, you MUST STRICTLY build the presentation ONLY out of those items. Do NOT generate a general presentation about the topic from the [CONTENT FROM COURSE MATERIALS]. Create exactly one slide per item/question (e.g. "Q1: What is De Morgan's Law?").
-IMPORTANT FOR QUESTIONS: If the question has multiple choices (A, B, C, D, etc.), you MUST include every choice as a bullet point on the slide, and explicitly state the correct answer at the bottom (e.g. "- Correct Answer: C").
+If the [USER REQUEST] asks you to put specific questions or items from the [CONVERSATION CONTEXT] into a presentation, you MUST STRICTLY build the presentation ONLY out of those items. Do NOT generate a general presentation about the topic from the [CONTENT FROM COURSE MATERIALS]. 
+RULES FOR QUESTION PRESENTATIONS:
+1. The FIRST slide MUST be a generic cover slide (e.g., "# Quiz Presentation", "- Topic: De Morgan's Law"). Do NOT put a question on the cover slide.
+2. Put the FIRST question on the second slide, the SECOND question on the third slide, and so on (exactly one slide per question).
+3. If the question has multiple choices (A, B, C, D, etc.), you MUST include every choice as a bullet point on the slide, and explicitly state the correct answer at the bottom (e.g. "- Correct Answer: C").
 In this specific case, ignore the 6-slide minimum.
 
 NOW generate the full blueprint based on the rules and instructions above:"""
