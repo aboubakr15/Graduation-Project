@@ -128,7 +128,9 @@ class MaterialSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request:
             return None
-        if obj.file:   # stored binary
+        if getattr(obj, 'file', None):   # stored binary
+            return request.build_absolute_uri(f'/api/professor/materials/{obj.pk}/download/')
+        if obj.file_url and obj.file_url.startswith('/media/'):
             return request.build_absolute_uri(f'/api/professor/materials/{obj.pk}/download/')
         return obj.file_url or None   # legacy external URL fallback
 
@@ -222,7 +224,9 @@ class AssignmentListSerializer(serializers.ModelSerializer):
             return None
         if getattr(obj, 'file', None):
             return request.build_absolute_uri(f'/api/professor/assignments/{obj.pk}/download/')
-        return None
+        if getattr(obj, 'file_url', None) and obj.file_url.startswith('/media/'):
+            return request.build_absolute_uri(f'/api/professor/assignments/{obj.pk}/download/')
+        return getattr(obj, 'file_url', None) or None
 
 
 class AssignmentDetailSerializer(serializers.ModelSerializer):
@@ -244,7 +248,9 @@ class AssignmentDetailSerializer(serializers.ModelSerializer):
             return None
         if getattr(obj, 'file', None):
             return request.build_absolute_uri(f'/api/professor/assignments/{obj.pk}/download/')
-        return None
+        if getattr(obj, 'file_url', None) and obj.file_url.startswith('/media/'):
+            return request.build_absolute_uri(f'/api/professor/assignments/{obj.pk}/download/')
+        return getattr(obj, 'file_url', None) or None
 
 class AssignmentCreateSerializer(serializers.ModelSerializer):
     class Meta:
