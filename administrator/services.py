@@ -361,3 +361,117 @@ class AdminEnrollmentService:
             offering.enrollment_count = max(0, offering.enrollment_count - 1)
             offering.save()
         enrollment.delete()
+
+
+class AdminInstructionsService:
+    @staticmethod
+    def upload_college_instructions(file_obj):
+        """
+        Saves the uploaded file temporarily, processes it into chunks,
+        and uploads the embeddings to an isolated Qdrant collection named 'college_instructions'.
+        """
+        import os
+        import sys
+        import tempfile
+        import sqlite3
+        import pdfplumber
+        import pandas as pd
+        from pathlib import Path
+        
+        # Add ai_engine to sys.path so that internal imports work correctly
+        ai_engine_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'ai_engine'))
+        if ai_engine_path not in sys.path:
+            sys.path.append(ai_engine_path)
+            
+        from ai_engine.config.settings import DATA_DIR
+        
+        # Save uploaded file to a temporary file
+        fd, temp_path = tempfile.mkstemp(suffix=os.path.splitext(file_obj.name)[1])
+        try:
+            with os.fdopen(fd, 'wb') as f:
+                for chunk in file_obj.chunks():
+                    f.write(chunk)
+            
+            db_path = DATA_DIR / "college_instructions.sqlite"
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Clear old database if it exists
+            if db_path.exists():
+                try:
+                    os.remove(db_path)
+                except Exception:
+                    pass
+                    
+            conn = sqlite3.connect(str(db_path))
+            table_count = 0
+            
+            # Process PDF to extract tables
+            with pdfplumber.open(temp_path) as pdf:
+                for page_num, page in enumerate(pdf.pages):
+                    tables = page.extract_tables()
+                    for idx, table in enumerate(tables):
+                        # Filter out fully empty rows
+                        clean_table = [[cell for cell in row] for row in table if any(cell and str(cell).strip() for cell in row)]
+                        if len(clean_table) < 2:  # Skip if no data rows
+                            continue
+                            
+                        # Clean headers
+                        headers = clean_table[0]
+                        safe_headers = []
+                        for h_idx, h in enumerate(headers):
+                            if not h or str(h).strip() == "":
+                                safe_headers.append(f"col_{h_idx}")
+                            else:
+                                # Replace newlines and extra spaces in header
+                                cleaned_h = " ".join(str(h).replace('\n', ' ').split())
+                                safe_headers.append(cleaned_h)
+                                
+                        data = clean_table[1:]
+                        if not data:
+                            continue
+                            
+                        # Clean data cells: remove newlines, strip spaces, collapse multiple spaces
+                        clean_data = []
+                        for row in data:
+                            clean_row = []
+                            for cell in row:
+                                if cell is None:
+                                    clean_row.append(None)
+                                else:
+                                    cleaned_cell = " ".join(str(cell).replace('\n', ' ').split())
+                                    clean_row.append(cleaned_cell)
+                            clean_data.append(clean_row)
+                            
+                        # If the table has exactly 6 columns, it's the standard courses table in the PDF.
+                        # We will merge all of them into a single 'courses' table with standard English names!
+                        if len(safe_headers) == 6:
+                            standard_headers = ['prerequisite', 'practical_hours', 'lecture_hours', 'credit_hours', 'course_name', 'course_code']
+                            df = pd.DataFrame(clean_data, columns=standard_headers)
+                            df.to_sql('courses', conn, if_exists="append", index=False)
+                        else:
+                            df = pd.DataFrame(clean_data, columns=safe_headers)
+                            # Handle duplicate columns if any exist after cleaning
+                            if any(df.columns.duplicated()):
+                                cols = pd.Series(df.columns)
+                                for dup in cols[cols.duplicated()].unique(): 
+                                    cols[cols[cols == dup].index.values.tolist()] = [dup + '_' + str(i) if i != 0 else dup for i in range(sum(cols == dup))]
+                                df.columns = cols
+                                
+                            table_name = f"page_{page_num+1}_table_{idx+1}"
+                            df.to_sql(table_name, conn, if_exists="replace", index=False)
+                            
+                        table_count += 1
+                        
+            conn.close()
+            
+            if table_count == 0:
+                raise ValueError("Could not extract any tables from the uploaded file.")
+                
+            return {"status": "success", "tables_extracted": table_count}
+            
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass

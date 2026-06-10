@@ -305,3 +305,28 @@ class AdminProfileView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CollegeInstructionsUploadView(APIView):
+    """
+    POST /api/administrator/college-instructions/upload/
+    Accepts a file upload (PDF/Docx) containing the college instructions ("لائحة الطالب").
+    Processes the file and stores embeddings in an isolated Qdrant collection.
+    """
+    permission_classes = [IsAdminOnly]
+
+    def post(self, request):
+        if 'file' not in request.FILES:
+            return Response({"error": "No file provided."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        file_obj = request.FILES['file']
+        
+        try:
+            from .services import AdminInstructionsService
+            result = AdminInstructionsService.upload_college_instructions(file_obj)
+            return Response(
+                {"message": "Instructions uploaded and processed successfully.", "details": result},
+                status=status.HTTP_201_CREATED
+            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -25,6 +25,7 @@ from .views import (
     StudentGradingResultDetailView,
     StudentCourseChatListView,
     StudentAnnouncementListView,
+    StudentCollegeInstructionsQueryView,
 )
 
 urlpatterns = [
@@ -54,6 +55,9 @@ urlpatterns = [
     path('chat/<int:pk>/', StudentChatConversationDetailView.as_view(), name='student-chat-detail'),
     # Get messages for a conversation via query param: ?conversation_id=X
     path('chat/messages/', StudentChatMessagesView.as_view(), name='student-chat-messages'),
+
+    # College Instructions specific chat endpoint
+    path('chat/system-instructions/', StudentCollegeInstructionsQueryView.as_view(), name='student-instructions-chat'),
 
     # Conversation management (create, list, rename, delete)
     path('conversations/', StudentConversationView.as_view(), name='student-conversations'),

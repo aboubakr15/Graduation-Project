@@ -269,11 +269,23 @@ class StudentChatBotView(APIView):
             from ai_engine.ai_services import get_rag_pipeline
             rag = get_rag_pipeline()
 
+            # BUG 1 FIX: Find the latest blueprint from ALL messages (not just last 10)
+            # This is critical when history is truncated but the blueprint was adjusted.
+            BLUEPRINT_MARKERS = ["<!-- slide -->", "# Thank You", "المخطط المبدئي"]
+            latest_blueprint = None
+            all_msgs = conversation.messages.all().order_by('-timestamp')
+            for m in all_msgs:
+                if m.role == ChatMessage.Role.ASSISTANT:
+                    if any(marker in m.content for marker in BLUEPRINT_MARKERS):
+                        latest_blueprint = m.content
+                        break  # most recent blueprint found
+
             ai_result = rag.query(
                 question=content,
                 history=history,
                 selected_course=None, # We handle filtering via user_courses list for better matching
-                user_courses=enrolled_course_codes
+                user_courses=enrolled_course_codes,
+                latest_blueprint=latest_blueprint,
             )
             ai_response_content = ai_result.get("answer", "I'm sorry, I couldn't process that.")
             sources = ai_result.get("sources", [])
@@ -917,3 +929,69 @@ class StudentGradingResultDetailView(APIView):
 
         serializer = GradingResultSerializer(result)
         return Response(serializer.data)
+
+
+class StudentCollegeInstructionsQueryView(APIView):
+    """
+    POST /api/student/chat/system-instructions/
+    Allows students to ask administrative questions based on the college instructions (لائحة الطالب).
+    Stores conversation history in the database.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        question = request.data.get('message')
+        conversation_id = request.data.get('conversation_id')
+
+        if not question:
+            return Response({"error": "message is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Retrieve or create conversation
+        if conversation_id:
+            try:
+                conversation = ChatConversation.objects.get(id=conversation_id, student=request.user)
+            except ChatConversation.DoesNotExist:
+                return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            # Create a general administrative conversation (course_offering=None implies general admin chat)
+            conversation = ChatConversation.objects.create(
+                student=request.user,
+                course_offering=None,
+                title=question[:50]
+            )
+
+        # Format history
+        past_messages = ChatMessage.objects.filter(conversation=conversation).order_by('timestamp')
+        history = [
+            {"message": msg.content, "is_student": msg.role == ChatMessage.Role.USER}
+            for msg in past_messages
+        ]
+
+        # Save student message
+        student_message = ChatMessage.objects.create(
+            conversation=conversation,
+            role=ChatMessage.Role.USER,
+            content=question
+        )
+
+        # Process with AI using OpenRouter
+        try:
+            from ai_engine.ai_services import query_college_instructions
+            answer = query_college_instructions(question, history)
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            return Response({"error": str(e), "traceback": error_trace}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Save AI reply
+        ai_message = ChatMessage.objects.create(
+            conversation=conversation,
+            role=ChatMessage.Role.ASSISTANT,
+            content=answer
+        )
+
+        return Response({
+            "conversation_id": conversation.id,
+            "student_message": student_message.content,
+            "ai_response": ai_message.content
+        }, status=status.HTTP_200_OK)

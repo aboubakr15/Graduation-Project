@@ -96,7 +96,8 @@ class RAGPipeline:
         user_courses: List[str] = None,     # List of course codes (e.g. ["CS101", "MA111"])
         selected_course: str = None,         # A single course code to lock search to
         forced_documents: List[Document] = None, 
-        image_paths: List[str] = None
+        image_paths: List[str] = None,
+        latest_blueprint: str = None,        # Explicitly pass the latest blueprint to avoid history-limit bug
     ) -> Dict:
         
         if not self.is_initialized:
@@ -176,7 +177,7 @@ class RAGPipeline:
         # -----------------------------------------------------------------
         # ★ PRESENTATION ARCHITECT FLOW (Markdown-based) ★
         # -----------------------------------------------------------------
-        # ── Find the last assistant message ──────────────────────────
+        # ── Find the last assistant message (from limited history window) ──
         last_assistant_msg = ""
         if history:
             for msg in reversed(history):
@@ -184,12 +185,29 @@ class RAGPipeline:
                     last_assistant_msg = msg["content"]
                     break
 
-        # ── Detect blueprint context ─────────────────────────────────
+        # ── Detect blueprint context ─────────────────────────────────────
         # The Markdown blueprint always contains <!-- slide --> markers.
-        history_text = " ".join([m["content"] for m in history]) if history else ""
+        # BUG 1 FIX: Use the explicitly passed latest_blueprint first.
+        # The view layer searches ALL conversation messages, so this is
+        # always the most recent blueprint even if history is truncated.
         blueprint_markers = ["<!-- slide -->", "# Thank You", "المخطط المبدئي"]
+
+        # Priority: explicit latest_blueprint > last_assistant_msg in history
+        effective_blueprint = latest_blueprint or ""
+        if not effective_blueprint:
+            # Fall back to scanning history for the most recent blueprint
+            if history:
+                for msg in reversed(history):
+                    if msg["role"] == "assistant" and any(
+                        marker in msg["content"] for marker in blueprint_markers
+                    ):
+                        effective_blueprint = msg["content"]
+                        break
+
+        history_text = " ".join([m["content"] for m in history]) if history else ""
         is_blueprint_context = (
-            any(marker in history_text for marker in blueprint_markers)
+            bool(effective_blueprint)
+            or any(marker in history_text for marker in blueprint_markers)
             or any(marker in last_assistant_msg for marker in blueprint_markers)
         )
 
@@ -213,10 +231,12 @@ class RAGPipeline:
             logger.info(f"Presentation Flow: phase2={is_phase_2}, adjustment={is_adjustment}, blueprint_ctx={is_blueprint_context}")
 
             # ── Retrieve source material ──────────────────────────────────
+            # BUG 1 FIX: Use effective_blueprint (latest) for search query, not last_assistant_msg
+            blueprint_for_phase2 = effective_blueprint or last_assistant_msg
             search_query = rewritten_query
             if is_phase_2:
-                search_query = "\n".join(last_assistant_msg.split("\n")[:10])
-                logger.info(f"Phase 2 search hint: {search_query[:100]}...")
+                search_query = "\n".join(blueprint_for_phase2.split("\n")[:10])
+                logger.info(f"Phase 2 search hint (from latest blueprint): {search_query[:100]}...")
 
             raw_documents = forced_documents if forced_documents else self.retriever.retrieve(search_query)
             context_parts = []
@@ -228,15 +248,34 @@ class RAGPipeline:
 
             if is_phase_2:
                 # ── PHASE 2: Expand blueprint → full Markdown → PPTX ─────
+                logger.info(f"Phase 2: Using {'explicit latest' if latest_blueprint else 'history'} blueprint.")
                 logger.info("Phase 2: Generating full Markdown slide deck...")
-                final_md = self.generator.get_presentation_final_md(full_context, last_assistant_msg)
+                # BUG 1 FIX: Always use the latest blueprint (not just last_assistant_msg)
+                final_md = self.generator.get_presentation_final_md(full_context, blueprint_for_phase2)
                 if not final_md:
                     return {"answer": "Error: Could not generate slide content.", "sources": []}
 
+                # BUG 3: Generate code images for code slides with per-slide precision
                 user_images = [p for p in (image_paths or []) if p and os.path.exists(p)]
+                # per_slide_images is a slide-parallel list where each entry is either
+                # a code image path (for code slides) or "" (for normal slides).
+                per_slide_images = self.presentation_maker.generate_code_images_from_markdown(final_md)
+                # Filter out empty entries to check if any code images were generated
+                actual_code_images = [p for p in per_slide_images if p]
+
                 pptx_path = self.presentation_maker.create_from_markdown(
-                    final_md, user_images, "generated_presentation.pptx"
+                    final_md,
+                    image_paths=user_images if user_images else None,
+                    per_slide_images=per_slide_images if actual_code_images else None,
+                    filename="generated_presentation.pptx",
                 )
+
+                # Clean up temporary code images
+                for img_path in actual_code_images:
+                    try:
+                        os.remove(img_path)
+                    except Exception:
+                        pass
 
                 if pptx_path:
                     msg = (
@@ -249,8 +288,9 @@ class RAGPipeline:
 
             elif is_adjustment:
                 # ── REFINEMENT: Update blueprint based on user feedback ───
+                # BUG 1 FIX: Use the latest known blueprint as the base for adjustments
                 blueprint_md = self.generator.adjust_presentation_blueprint_md(
-                    last_assistant_msg,
+                    blueprint_for_phase2,
                     question
                 )
                 return {"answer": blueprint_md, "sources": []}

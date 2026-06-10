@@ -50,6 +50,7 @@ class PresentationMaker:
         slides_data: List[Dict],
         image_paths: List[str] = None,
         filename: str = "presentation.pptx",
+        slide_image_map: Dict[int, str] = None,
     ) -> Optional[str]:
         """
         Creates a professionally styled .pptx file.
@@ -65,6 +66,9 @@ class PresentationMaker:
             - If provided       → images are distributed across non-cover/non-closing slides
                                   in order. Slides without a matching image render as
                                   plain content slides (no image inserted).
+
+        slide_image_map: optional dict {slide_index: image_path} for PRECISE per-slide
+            image assignment (overrides image_paths ordering). Used for code-image slides.
         """
         try:
             prs = Presentation()
@@ -72,28 +76,27 @@ class PresentationMaker:
             prs.slide_width  = Inches(13.333)
             prs.slide_height = Inches(7.5)
 
-            # Validate provided image paths — keep only real, existing files
-            valid_images: List[str] = []
-            for p in (image_paths or []):
-                if p and os.path.exists(p):
-                    valid_images.append(p)
-                else:
-                    logger.warning(f"Image path not found, skipping: {p}")
+            # Build the final img_map: slide index → image path
+            img_map: Dict[int, str] = {}
 
-            has_images = len(valid_images) > 0
-
-            # Build an image assignment map:
-            # Assign images only to content/two_column slides, in order.
-            # cover and closing slides never receive images.
-            image_iter = iter(valid_images)
-            img_map: Dict[int, str] = {}   # slide index → image path
-            if has_images:
-                for idx, slide_info in enumerate(slides_data):
-                    stype = slide_info.get("type", "content").lower()
-                    if stype not in ("cover", "closing"):
-                        img = next(image_iter, None)
-                        if img:
-                            img_map[idx] = img
+            if slide_image_map:
+                # Precise per-slide assignment (code images)
+                for idx, p in slide_image_map.items():
+                    if p and os.path.exists(p):
+                        img_map[idx] = p
+            elif image_paths:
+                # Legacy: distribute valid images to content slides in order
+                valid_images: List[str] = [
+                    p for p in image_paths if p and os.path.exists(p)
+                ]
+                if valid_images:
+                    image_iter = iter(valid_images)
+                    for idx, slide_info in enumerate(slides_data):
+                        stype = slide_info.get("type", "content").lower()
+                        if stype not in ("cover", "closing"):
+                            img = next(image_iter, None)
+                            if img:
+                                img_map[idx] = img
 
             for idx, slide_info in enumerate(slides_data):
                 slide_type = slide_info.get("type", "content").lower()
@@ -104,10 +107,10 @@ class PresentationMaker:
                 elif slide_type == "closing":
                     self._add_closing_slide(prs, slide_info, idx + 1, len(slides_data))
                 elif img_path:
-                    # User-supplied images take priority for two-column layout
+                    # Image available → two-column layout (text left, image right)
                     self._add_two_column_slide(prs, slide_info, img_path, idx + 1, len(slides_data))
                 else:
-                    # High-impact content slide (respecting Rule of Six)
+                    # Plain content slide
                     self._add_content_slide(prs, slide_info, idx + 1, len(slides_data))
 
             output_path = self._unique_path(os.path.join(self.output_dir, filename))
@@ -147,6 +150,7 @@ class PresentationMaker:
         - Other blocks → type = "content"
         - Lines starting with ``#``   → slide title (first heading wins)
         - Lines starting with ``-``/``*`` → bullet points
+        - Fenced code blocks (```...```) → stored in "code_block" field
         - Empty / other lines → ignored
         """
         import re as _re
@@ -161,28 +165,51 @@ class PresentationMaker:
 
             title = ""
             bullets = []
+            code_block = ""
 
-            for line in block.splitlines():
-                line = line.strip()
-                if not line:
+            lines = block.splitlines()
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                stripped = line.strip()
+                if not stripped:
+                    i += 1
                     continue
-                if line.startswith('#'):
+                # Detect fenced code blocks
+                if stripped.startswith('```'):
+                    # Collect all lines until closing fence
+                    lang = stripped[3:].strip()  # e.g. 'python'
+                    code_lines = []
+                    i += 1
+                    while i < len(lines) and not lines[i].strip().startswith('```'):
+                        code_lines.append(lines[i])
+                        i += 1
+                    # i is now on the closing ``` line
+                    code_block = "\n".join(code_lines).strip()
+                    i += 1
+                    continue
+                if stripped.startswith('#'):
                     if not title:
-                        title = line.lstrip('#').strip()
-                elif line.startswith('-') or line.startswith('*'):
-                    text = line.lstrip('-*').strip()
+                        title = stripped.lstrip('#').strip()
+                elif stripped.startswith('-') or stripped.startswith('*'):
+                    text = stripped.lstrip('-*').strip()
                     if text:
                         bullets.append(text)
+                i += 1
 
-            if not title and not bullets:
+            if not title and not bullets and not code_block:
                 continue
 
-            slides.append({
+            slide_dict = {
                 "type": "content",
                 "title": title or "Slide",
                 "content": bullets,
                 "notes": "",
-            })
+            }
+            if code_block:
+                slide_dict["code_block"] = code_block
+
+            slides.append(slide_dict)
 
         if not slides:
             return slides
@@ -203,19 +230,172 @@ class PresentationMaker:
 
         return slides
 
+    def generate_code_images_from_markdown(self, markdown_str: str) -> List[str]:
+        """
+        Scan the markdown for code-slide blocks and render each code block
+        as a PNG image (dark background, light monospace text).
+
+        Returns:
+            List of absolute paths to the generated temporary PNG images.
+            Returns [] if Pillow is not available or no code blocks found.
+        """
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except ImportError:
+            logger.warning("Pillow not installed — code images cannot be generated. Install with: pip install Pillow")
+            return []
+
+        import re as _re
+        import tempfile
+
+        CODE_SLIDE_KEYWORDS = [
+            "code", "implementation", "example", "algorithm",
+            "snippet", "solution", "walkthrough",
+        ]
+
+        slides = self.parse_markdown_slides(markdown_str)
+        image_paths: List[str] = []
+
+        # We only generate images for slides that actually have a code_block.
+        for slide in slides:
+            code = slide.get("code_block", "").strip()
+            title_lower = slide.get("title", "").lower()
+            is_code_slide = code or any(kw in title_lower for kw in CODE_SLIDE_KEYWORDS)
+            if not is_code_slide or not code:
+                image_paths.append("")  # placeholder for non-code slides
+                continue
+
+            img_path = self._render_code_image(code)
+            image_paths.append(img_path if img_path else "")
+
+        return image_paths
+
+    def _render_code_image(
+        self,
+        code: str,
+        width: int = 1100,
+        bg_color: tuple = (18, 18, 18),
+        text_color: tuple = (212, 212, 212),
+        keyword_color: tuple = (86, 156, 214),
+        string_color: tuple = (206, 145, 120),
+        comment_color: tuple = (106, 153, 85),
+        font_size: int = 20,
+    ) -> Optional[str]:
+        """Render a code string as a styled PNG image and return the file path."""
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            import tempfile, os as _os
+
+            # ── Font selection ────────────────────────────────────────────
+            # Try common monospace fonts; fall back to Pillow default.
+            mono_fonts = [
+                "Consolas", "DejaVuSansMono", "DejaVu Sans Mono",
+                "Courier New", "Courier", "Liberation Mono",
+            ]
+            font = None
+            for fname in mono_fonts:
+                try:
+                    font = ImageFont.truetype(fname, font_size)
+                    break
+                except Exception:
+                    try:
+                        font = ImageFont.truetype(fname + ".ttf", font_size)
+                        break
+                    except Exception:
+                        continue
+            if font is None:
+                try:
+                    font = ImageFont.load_default(size=font_size)
+                except Exception:
+                    font = ImageFont.load_default()
+
+            # ── Measure text dimensions ───────────────────────────────────
+            padding = 24
+            line_height = font_size + 8
+            lines = code.splitlines()
+            height = max(line_height * (len(lines) + 2) + padding * 2, 200)
+
+            # ── Draw image ────────────────────────────────────────────────
+            img = Image.new("RGB", (width, height), color=bg_color)
+            draw = ImageDraw.Draw(img)
+
+            # Header bar
+            header_h = 32
+            draw.rectangle([(0, 0), (width, header_h)], fill=(40, 40, 40))
+            for cx, col in [(16, (255, 95, 86)), (40, (255, 189, 46)), (64, (39, 201, 63))]:
+                draw.ellipse([(cx - 7, header_h // 2 - 7), (cx + 7, header_h // 2 + 7)], fill=col)
+            draw.text((88, header_h // 2 - font_size // 2), "code", font=font, fill=(150, 150, 150))
+
+            # Code lines
+            y = header_h + padding
+
+            import re as _re
+            KEYWORDS = {
+                "python": [
+                    r"\b(def|class|return|if|elif|else|for|while|import|from|as|"
+                    r"with|try|except|finally|pass|break|continue|yield|lambda|"
+                    r"True|False|None|and|or|not|in|is)\b"
+                ],
+            }
+
+            for line in lines:
+                # Simple tokeniser: draw keyword-coloured spans, then rest
+                x = padding
+                remaining = line
+
+                # Draw line number (muted)
+                draw.text((x, y), " ", font=font, fill=(80, 80, 80))
+
+                # Detect comments
+                comment_pos = line.find("#")
+                code_part = line if comment_pos == -1 else line[:comment_pos]
+                comment_part = "" if comment_pos == -1 else line[comment_pos:]
+
+                # Draw the non-comment part word by word
+                draw.text((x, y), code_part, font=font, fill=text_color)
+
+                # Draw comment in comment colour
+                if comment_part:
+                    try:
+                        code_bbox = draw.textbbox((x, y), code_part, font=font)
+                        comment_x = code_bbox[2]
+                    except AttributeError:
+                        comment_x = x + len(code_part) * (font_size // 2)
+                    draw.text((comment_x, y), comment_part, font=font, fill=comment_color)
+
+                y += line_height
+
+            # Save to temp file
+            tmp = tempfile.NamedTemporaryFile(
+                suffix=".png", delete=False, prefix="code_slide_"
+            )
+            img.save(tmp.name, "PNG")
+            tmp.close()
+            logger.info(f"Code image saved: {tmp.name}")
+            return tmp.name
+
+        except Exception as e:
+            logger.error(f"Failed to render code image: {e}")
+            return None
+
     def create_from_markdown(
         self,
         markdown_str: str,
         image_paths: List[str] = None,
         filename: str = "presentation.pptx",
+        per_slide_images: List[str] = None,
     ) -> Optional[str]:
         """
         Convenience wrapper: parse Markdown string and produce a .pptx file.
 
         Args:
-            markdown_str: Full Markdown deck (``# Title / - bullet / <!-- slide -->``).
-            image_paths:  Optional list of local image paths to embed.
-            filename:     Output filename for the .pptx.
+            markdown_str:     Full Markdown deck (``# Title / - bullet / <!-- slide -->``).
+            image_paths:      Optional list of local image paths to distribute in order.
+            filename:         Output filename for the .pptx.
+            per_slide_images: Optional slide-parallel list of image paths (one entry per
+                              parsed slide, empty string = no image for that slide).
+                              When provided, images are placed on their matching slides
+                              precisely (used for code images).
 
         Returns:
             Absolute path to the saved .pptx, or ``None`` on error.
@@ -225,7 +405,21 @@ class PresentationMaker:
             logger.error("Markdown parsing returned no slides — aborting PPTX creation.")
             return None
         logger.info(f"Parsed {len(slides_data)} slide(s) from Markdown.")
-        return self.create_presentation(slides_data, image_paths=image_paths, filename=filename)
+
+        # Build a precise slide_image_map from per_slide_images if provided
+        slide_image_map: Optional[Dict[int, str]] = None
+        if per_slide_images:
+            slide_image_map = {}
+            for idx, p in enumerate(per_slide_images):
+                if p and os.path.exists(p):
+                    slide_image_map[idx] = p
+
+        return self.create_presentation(
+            slides_data,
+            image_paths=image_paths,
+            filename=filename,
+            slide_image_map=slide_image_map,
+        )
 
     # ──────────────────────────────────────────────────────────────────
     # Slide builders
@@ -418,7 +612,7 @@ class PresentationMaker:
         # Large decorative circle (background element)
         circle = slide.shapes.add_shape(
             MSO_SHAPE.OVAL,
-            Inches(8.5), Inches(-1.0), Inches(6.5), Inches(6.5)
+            Inches(6.5), Inches(0.5), Inches(6.5), Inches(6.5)
         )
         circle.fill.solid()
         circle.fill.fore_color.rgb = RGBColor(0x25, 0x32, 0x75)

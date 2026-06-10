@@ -201,50 +201,78 @@ class Generator:
             return "Error: LLM not available for blueprint generation."
 
         prompt = f"""You are a Professional Presentation Architect.
-Your ONLY job is to output a slide-by-slide OUTLINE for a presentation.
-If the user asks to change or adjust an existing outline, you MUST output the completely updated outline in the correct format. NEVER explain how to do it or talk to the user.
+Your ONLY job is to output a detailed slide-by-slide OUTLINE for a presentation.
+NEVER explain, converse, or add any text outside the slide blocks.
 
-OUTPUT FORMAT — YOU MUST FOLLOW THIS EXACTLY:
-- Separate each slide with the HTML comment: <!-- slide -->
-- Each slide block starts with a Markdown heading: # Slide Title
-- Each slide block contains 1-3 SHORT bullet points (just the goal/topic, NOT full sentences).
-  Use a single dash: - bullet
-- The FIRST slide must always be a cover slide (title of the presentation + 1-line subtitle).
-- The LAST slide must always be a closing slide with title: # Thank You
-  and one bullet: - Questions & Discussion
-- ABSOLUTELY NO EXTRA TEXT. Do NOT converse, do NOT explain, do NOT say "Here is your updated outline". Output ONLY the slide blocks.
-- Do NOT wrap the output in ```markdown``` fences.
+MINIMUM REQUIREMENTS — MANDATORY:
+- Generate AT LEAST 6 to 8 slides (not counting the cover and Thank You slides).
+- Each slide MUST have a clear, specific title.
+- Each slide MUST have 2 to 4 SHORT, meaningful bullet points that cover the topic.
+- If the user requests an example or code, include dedicated slides for it (e.g., '# Example: Stack Push Operation', '# Code Solution', '# Step-by-Step Walkthrough').
+- Do NOT combine everything into one or two slides.
 
-EXAMPLE OUTPUT (follow this structure exactly):
-# Introduction to Neural Networks
-- A beginner's guide to deep learning concepts
+OUTPUT FORMAT — FOLLOW EXACTLY:
+- Separate each slide with: <!-- slide -->
+- Each slide block starts with: # Slide Title
+- Each bullet uses a single dash: - bullet point text
+- FIRST slide = cover slide (title + 1-line subtitle)
+- LAST slide = # Thank You with bullet: - Questions & Discussion
+- NO extra text, NO markdown fences, NO explanation.
+
+EXAMPLE (follow this structure — notice multiple detailed slides):
+# Introduction to Stacks
+- A fundamental data structure in Computer Science
+- Used in function calls, undo operations, and parsing
 
 <!-- slide -->
 
-# What is a Neural Network?
-- Inspired by the human brain
-- Layers of interconnected nodes
+# What is a Stack?
+- A Last-In, First-Out (LIFO) data structure
+- Elements are added and removed from the top
+- Analogy: A stack of plates
+
+<!-- slide -->
+
+# Stack Operations
+- Push: Add element to top
+- Pop: Remove element from top
+- Peek: View top element without removing
+- isEmpty: Check if stack is empty
+
+<!-- slide -->
+
+# Example: Stack in Action
+- Push 10, Push 20, Push 30
+- Stack state: [10, 20, 30] → top is 30
+- Pop returns 30, stack becomes [10, 20]
+
+<!-- slide -->
+
+# Code Solution (Array Implementation)
+- Declare array and top pointer
+- Push: arr[++top] = value
+- Pop: return arr[top--]
 
 <!-- slide -->
 
 # Thank You
 - Questions & Discussion
 
-NOW generate the blueprint for this request:
+NOW generate the full blueprint for this request. Remember: minimum 6 content slides.
 
-[CONTENT]
+[CONTENT FROM COURSE MATERIALS]
 {content[:5000]}
 
 [USER REQUEST]
 {user_request}
 
-Blueprint (Markdown only, no extra text):"""
+Blueprint (Markdown only, minimum 6 content slides, no extra text):"""
 
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=1500,
+                max_tokens=3000,
                 temperature=0.4,
             )
             return response.choices[0].message.content.strip()
@@ -263,28 +291,31 @@ Blueprint (Markdown only, no extra text):"""
 Your ONLY job is to modify the existing presentation outline based on the user's request.
 NEVER explain how to do it or talk to the user.
 
-Here is the existing presentation outline:
+Here is the EXISTING COMPLETE presentation outline (you MUST keep ALL existing slides):
 {previous_blueprint}
 
 User request for adjustments:
 {user_request}
 
-OUTPUT FORMAT — YOU MUST FOLLOW THIS EXACTLY:
-- Separate each slide with the HTML comment: <!-- slide -->
-- Each slide block starts with a Markdown heading: # Slide Title
-- Each slide block contains 1-3 SHORT bullet points (just the goal/topic, NOT full sentences).
-  Use a single dash: - bullet
-- The FIRST slide must always be a cover slide (title of the presentation + 1-line subtitle).
-- ABSOLUTELY NO EXTRA TEXT. Do NOT converse, do NOT explain, do NOT say "Here is your updated outline". Output ONLY the slide blocks.
+CRITICAL RULES:
+- Output the FULL updated blueprint including ALL original slides PLUS any additions/changes.
+- Do NOT drop any existing slides unless the user explicitly asks to remove them.
+- If the user asks to add slides (e.g., "add an example", "add code"), create DEDICATED slides for each request with 2-4 meaningful bullet points each.
+- Append new slides BEFORE the final '# Thank You' slide.
+- Each slide MUST have a clear title and 2-4 specific, descriptive bullet points.
+- Separate each slide with: <!-- slide -->
+- Each slide block starts with: # Slide Title
+- Bullets use a single dash: - bullet point
+- ABSOLUTELY NO EXTRA TEXT. Output ONLY the slide blocks.
 - Do NOT wrap the output in ```markdown``` fences.
 
-Updated Blueprint (Markdown only, no extra text):"""
+Updated Blueprint (full, including all original slides, no extra text):"""
 
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=1500,
+                max_tokens=3000,
                 temperature=0.3,
             )
             return response.choices[0].message.content.strip()
@@ -309,14 +340,26 @@ OUTPUT FORMAT — YOU MUST FOLLOW THIS EXACTLY:
 - Separate each slide with the HTML comment: <!-- slide -->
 - Each slide block starts with: # Slide Title
 - Each content slide has 4-6 bullets. Use: - bullet
-- Each bullet MUST be a COMPLETE EDUCATIONAL SENTENCE of 10-18 words that EXPLAINS a concept.
+- For NORMAL slides: each bullet MUST be a COMPLETE EDUCATIONAL SENTENCE of 10-18 words.
   BAD:  "- Represents program in memory"
   GOOD: "- The text segment stores the compiled machine code of the program that the CPU executes."
 - The FIRST slide (cover) keeps only the title and 1-line subtitle bullet.
-- The LAST slide (# Thank You) keeps only: - Questions & Discussion
+- The LAST slide MUST EXACTLY match what is in the [APPROVED OUTLINE] for the last slide. Do NOT force "Questions & Discussion" if it's not in the outline.
 - STICK TO SOURCE: only use ideas from [CONTENT SOURCE]. Do NOT add external topics.
-- Do NOT add any extra text, explanations, headers, or code blocks outside the slide blocks.
+- Do NOT add any extra text, explanations, headers outside the slide blocks.
 - Do NOT wrap the output in ```markdown``` fences.
+
+SPECIAL RULE FOR CODE SLIDES:
+If a slide title contains "Code", "Implementation", "Example", "Algorithm", "Snippet", "Solution", or "Walkthrough",
+you MUST include the ACTUAL code implementation using a fenced code block, like this:
+- Brief explanation of what the code does (1 sentence)
+```python
+# actual working code here
+def example():
+    pass
+```
+- Brief explanation of the output or behavior
+Do NOT convert code into plain English sentences on code slides. Provide real, runnable code.
 
 [CONTENT SOURCE]
 {content[:5000]}
@@ -688,16 +731,21 @@ Question: {question}"""
 Analyze the user's latest question in the context of their chat history (if any).
 Classify the user's intent into EXACTLY ONE of the following categories:
 
-- "create_presentation": The user explicitly wants to generate a new PowerPoint presentation, slide deck, or presentation outline. (e.g., "create a presentation about AI", "make slides for this topic").
-- "adjust_presentation": The user is asking to modify, add, remove, or change slides in an ALREADY EXISTING presentation blueprint.
-- "approve_presentation": The user is approving an existing presentation blueprint to be finalized/downloaded (e.g., "looks good", "perfect, generate it").
+- "create_presentation": The user wants to CREATE A BRAND NEW presentation from scratch (e.g., "create a presentation about AI", "make slides for machine learning"). Use this ONLY when there is NO existing blueprint in the chat history.
+- "adjust_presentation": The user is asking to modify, add, remove, or change slides in an ALREADY EXISTING presentation blueprint in the chat history.
+- "approve_presentation": The user wants to FINALIZE and DOWNLOAD the existing blueprint that was already shown to them. This includes phrases like: "looks good", "perfect", "generate it", "create it", "build it", "ok go ahead", "yes do it", "make the presentation", "download it" — when there IS an existing blueprint in the chat history.
 - "recommendation": The user is asking for external resources, YouTube videos, or course recommendations to learn more.
 - "general_question": A normal academic question, asking for an explanation, summary, or asking the bot to "go over slides" / "explain these slides". (This is NOT creating a presentation).
+
+IMPORTANT RULE: If the chat history already contains a presentation blueprint (marked with <!-- slide --> or # Thank You), then:
+  - "generate it" / "create it" / "make it" = "approve_presentation" (finalize the existing one)
+  - "add more slides" / "remove slide" / "change title" = "adjust_presentation"
+  - A completely new presentation topic = "create_presentation"
 
 Output EXACTLY ONE WORD from the quotes above. No other text.
 
 Chat History Context:
-{history_text[-1000:] if history_text else "None"}
+{history_text[-1500:] if history_text else "None"}
 
 Latest Question: {question}"""
 
