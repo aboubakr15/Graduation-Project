@@ -525,6 +525,8 @@ class CourseChatMessage(models.Model):
     sender_name = models.CharField(max_length=255, default='')
     content = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
+    is_edited = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'course_chat_messages'

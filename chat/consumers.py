@@ -80,38 +80,101 @@ class CourseChatConsumer(AsyncWebsocketConsumer):
         except (json.JSONDecodeError, TypeError):
             return
 
-        content = (data.get('content') or '').strip()
-        if not content:
+        action = data.get('action', 'chat_message')
+
+        if action == 'edit_message':
+            message_id = data.get('message_id')
+            content = (data.get('content') or '').strip()
+            if not message_id or not content:
+                return
+            msg = await self._edit_message(self.user, message_id, content)
+            if msg is None:
+                return
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    'type': 'chat_message_edited',
+                    'id': msg['id'],
+                    'content': msg['content'],
+                    'is_edited': True,
+                }
+            )
             return
 
-        # Persist the message
-        msg = await self._save_message(self.user, self.course_id, content)
-        if msg is None:
+        elif action == 'delete_message':
+            message_id = data.get('message_id')
+            if not message_id:
+                return
+            msg = await self._delete_message(self.user, message_id)
+            if msg is None:
+                return
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    'type': 'chat_message_deleted',
+                    'id': msg['id'],
+                    'content': msg['content'],
+                    'is_deleted': True,
+                }
+            )
             return
 
-        # Broadcast to all members of the course group
-        await self.channel_layer.group_send(
-            self.group_name,
-            {
-                'type': 'chat_message',
-                'id': msg['id'],
-                'sender_id': msg['sender_id'],
-                'sender_name': msg['sender_name'],
-                'sender_role': msg['sender_role'],
-                'content': msg['content'],
-                'created_at': msg['created_at'],
-            }
-        )
+        elif action == 'chat_message':
+            content = (data.get('content') or '').strip()
+            if not content:
+                return
+
+            # Persist the message
+            msg = await self._save_message(self.user, self.course_id, content)
+            if msg is None:
+                return
+
+            # Broadcast to all members of the course group
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    'type': 'chat_message',
+                    'id': msg['id'],
+                    'sender_id': msg['sender_id'],
+                    'sender_name': msg['sender_name'],
+                    'sender_role': msg['sender_role'],
+                    'content': msg['content'],
+                    'created_at': msg['created_at'],
+                    'is_edited': False,
+                    'is_deleted': False,
+                }
+            )
 
     async def chat_message(self, event):
         """Handler called by group_send. Forwards the message to the WebSocket client."""
         await self.send(text_data=json.dumps({
+            'action': 'chat_message',
             'id': event['id'],
             'sender_id': event['sender_id'],
             'sender_name': event['sender_name'],
             'sender_role': event['sender_role'],
             'content': event['content'],
             'created_at': event['created_at'],
+            'is_edited': event.get('is_edited', False),
+            'is_deleted': event.get('is_deleted', False),
+        }))
+
+    async def chat_message_edited(self, event):
+        """Handler for when a message is edited."""
+        await self.send(text_data=json.dumps({
+            'action': 'edit_message',
+            'id': event['id'],
+            'content': event['content'],
+            'is_edited': True,
+        }))
+
+    async def chat_message_deleted(self, event):
+        """Handler for when a message is deleted."""
+        await self.send(text_data=json.dumps({
+            'action': 'delete_message',
+            'id': event['id'],
+            'content': event['content'],
+            'is_deleted': True,
         }))
 
     # ── Database helpers (run in thread pool via database_sync_to_async) ──
@@ -178,4 +241,55 @@ class CourseChatConsumer(AsyncWebsocketConsumer):
             }
         except Exception as e:
             logger.error(f'Failed to save chat message: {e}')
+            return None
+
+    @database_sync_to_async
+    def _edit_message(self, user, message_id, content):
+        from main.models import CourseChatMessage
+        try:
+            msg = CourseChatMessage.objects.get(id=message_id, course_offering_id=self.course_id)
+            if msg.sender_id != user.id:
+                return None
+            if msg.is_deleted:
+                return None
+            msg.content = content
+            msg.is_edited = True
+            msg.save()
+            return {
+                'id': msg.id,
+                'content': msg.content,
+            }
+        except CourseChatMessage.DoesNotExist:
+            return None
+        except Exception as e:
+            logger.error(f'Failed to edit chat message: {e}')
+            return None
+
+    @database_sync_to_async
+    def _delete_message(self, user, message_id):
+        from main.models import CourseChatMessage
+        try:
+            msg = CourseChatMessage.objects.get(id=message_id, course_offering_id=self.course_id)
+            
+            # Profs and TAs can delete ANY message, students only their own
+            can_delete = False
+            if user.primary_role in ['PROFESSOR', 'TA']:
+                can_delete = True
+            elif msg.sender_id == user.id:
+                can_delete = True
+                
+            if not can_delete or msg.is_deleted:
+                return None
+                
+            msg.content = "This message was deleted"
+            msg.is_deleted = True
+            msg.save()
+            return {
+                'id': msg.id,
+                'content': msg.content,
+            }
+        except CourseChatMessage.DoesNotExist:
+            return None
+        except Exception as e:
+            logger.error(f'Failed to delete chat message: {e}')
             return None
