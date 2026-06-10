@@ -103,6 +103,31 @@ class AdminUserService:
             )
 
         user = User.objects.create_user(**data)
+        
+        if role == User.Role.STUDENT and user.email:
+            from django.core.mail import send_mail
+            from django.conf import settings
+            from django.utils.http import urlsafe_base64_encode
+            from django.utils.encoding import force_bytes
+            from django.contrib.auth.tokens import default_token_generator
+            
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            
+            frontend_url = "https://eduera.live"
+            reset_link = f"{frontend_url}/reset-password?uid={uid}&token={token}"
+            
+            subject = "Welcome to Eduera - Your Account Details"
+            message = f"Hello {user.full_name},\n\nYour account has been successfully created.\nYour student ID / username is: {user.username}\n\nPlease set your password by clicking the link below:\n{reset_link}\n\nWelcome to Eduera!"
+            
+            send_mail(
+                subject,
+                message,
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=True
+            )
+            
         return user
 
     @staticmethod
@@ -127,7 +152,27 @@ class AdminUserService:
 class AdminAnnouncementService:
     @staticmethod
     def create_announcement(user, data):
-        return Announcement.objects.create(author=user, **data)
+        announcement = Announcement.objects.create(author=user, **data)
+        
+        if announcement.is_global:
+            from django.core.mail import send_mail
+            from django.conf import settings
+            from main.models import User
+            
+            student_emails = list(User.objects.filter(primary_role=User.Role.STUDENT, is_active=True).values_list('email', flat=True))
+            if student_emails:
+                subject = f"New Announcement: {announcement.title}"
+                message = f"Hello,\n\nA new announcement has been posted by the administration:\n\n{announcement.title}\n{announcement.content}\n\nThank you,\nEduera Administration"
+                
+                send_mail(
+                    subject=subject,
+                    message=message,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=student_emails,
+                    fail_silently=True
+                )
+                
+        return announcement
 
     @staticmethod
     def get_announcements():

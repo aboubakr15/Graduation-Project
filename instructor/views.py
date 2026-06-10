@@ -846,6 +846,31 @@ class AnnouncementListView(APIView):
         serializer = AnnouncementCreateSerializer(data=request.data)
         if serializer.is_valid():
             announcement = serializer.save(author=request.user)
+            
+            # Send emails to active students in the course
+            offering = announcement.course_offering
+            if offering:
+                from main.models import Enrollment
+                from django.core.mail import send_mail
+                from django.conf import settings
+                
+                student_emails = list(Enrollment.objects.filter(
+                    course_offering=offering, 
+                    status=Enrollment.Status.ACTIVE
+                ).values_list('student__email', flat=True))
+                
+                if student_emails:
+                    subject = f"New Announcement in {offering.course.code}"
+                    message = f"Hello,\n\nA new announcement has been posted in {offering.course.name}:\n\n{announcement.title}\n{announcement.content}\n\nThank you,\n{request.user.full_name}"
+                    
+                    send_mail(
+                        subject=subject,
+                        message=message,
+                        from_email=settings.DEFAULT_FROM_EMAIL,
+                        recipient_list=student_emails,
+                        fail_silently=True
+                    )
+
             return Response(AnnouncementSerializer(announcement).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1175,6 +1200,27 @@ class CourseChatListView(APIView):
             sender_role=request.user.primary_role,
             content=content,
         )
+        
+        # Broadcast the message to WebSocket clients for seamless fallback
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f'course_chat_{offering.id}',
+                {
+                    'type': 'chat_message',
+                    'id': msg.id,
+                    'sender_id': msg.sender_id,
+                    'sender_name': msg.sender_name,
+                    'sender_role': msg.sender_role,
+                    'content': msg.content,
+                    'created_at': msg.created_at.isoformat(),
+                    'is_edited': False,
+                    'is_deleted': False,
+                }
+            )
+
         return Response(CourseChatMessageSerializer(msg).data, status=status.HTTP_201_CREATED)
 
 

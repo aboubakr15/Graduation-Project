@@ -465,6 +465,27 @@ class StudentCourseChatListView(APIView):
             sender_role=request.user.primary_role,
             content=content,
         )
+        
+        # Broadcast the message to WebSocket clients for seamless fallback
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)(
+                f'course_chat_{offering.id}',
+                {
+                    'type': 'chat_message',
+                    'id': msg.id,
+                    'sender_id': msg.sender_id,
+                    'sender_name': msg.sender_name,
+                    'sender_role': msg.sender_role,
+                    'content': msg.content,
+                    'created_at': msg.created_at.isoformat(),
+                    'is_edited': False,
+                    'is_deleted': False,
+                }
+            )
+
         return Response(CourseChatMessageSerializer(msg).data, status=status.HTTP_201_CREATED)
 
 
