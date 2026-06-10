@@ -269,11 +269,23 @@ class StudentChatBotView(APIView):
             from ai_engine.ai_services import get_rag_pipeline
             rag = get_rag_pipeline()
 
+            # BUG 1 FIX: Find the latest blueprint from ALL messages (not just last 10)
+            # This is critical when history is truncated but the blueprint was adjusted.
+            BLUEPRINT_MARKERS = ["<!-- slide -->", "# Thank You", "المخطط المبدئي"]
+            latest_blueprint = None
+            all_msgs = conversation.messages.all().order_by('-timestamp')
+            for m in all_msgs:
+                if m.role == ChatMessage.Role.ASSISTANT:
+                    if any(marker in m.content for marker in BLUEPRINT_MARKERS):
+                        latest_blueprint = m.content
+                        break  # most recent blueprint found
+
             ai_result = rag.query(
                 question=content,
                 history=history,
                 selected_course=None, # We handle filtering via user_courses list for better matching
-                user_courses=enrolled_course_codes
+                user_courses=enrolled_course_codes,
+                latest_blueprint=latest_blueprint,
             )
             ai_response_content = ai_result.get("answer", "I'm sorry, I couldn't process that.")
             sources = ai_result.get("sources", [])
