@@ -38,6 +38,7 @@ docx2txt>=0.9
 unstructured>=0.15.0
 pdfminer.six>=20221105
 pdfplumber>=0.11.0
+pandas>=2.0.0
 PyMuPDF>=1.24.0
 pytesseract>=0.3.10
 Pillow>=11.0.0

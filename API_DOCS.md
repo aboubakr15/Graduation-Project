@@ -643,6 +643,38 @@ Same as instructor.
 
 ---
 
+### Upload College Instructions
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/admin/college-instructions/upload/` |
+| **Method** | `POST` |
+| **Content-Type** | `multipart/form-data` |
+
+Uploads the official college instructions PDF. The system extracts tabular course data from the PDF and updates the central SQLite database for the AI-powered instructions chatbot.
+
+#### Request Body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `file` | file | Yes | The PDF file containing the college instructions tables |
+
+```json
+// Form Data
+file: [binary PDF file]
+```
+
+#### Response (200 OK)
+
+```json
+{
+    "status": "success",
+    "tables_extracted": 16
+}
+```
+
+---
+
 ## 6. Chat Monitoring
 
 ### List Conversations
@@ -1186,6 +1218,39 @@ Returns the message history of the most recent conversation.
         "content": "This is a mock response to 'Explain the last lecture.'. I am a student assistant AI.",
         "timestamp": "2024-11-19T10:00:05Z"
     }
+}
+```
+
+---
+
+### Ask College Instructions Chatbot
+
+| Property | Value |
+|----------|-------|
+| **Endpoint** | `/api/student/chat/system-instructions/` |
+| **Method** | `POST` |
+| **Content-Type** | `application/json` |
+
+Queries the College Instructions Chatbot regarding college rules, course prerequisites, and credit hours using the data extracted from the official PDF.
+
+#### Request Body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `message` | string | Yes | The user's question in Arabic or English |
+
+```json
+{
+    "message": "ما المواد التي يجب انهائها قبل دراسة مادة هياكل البيانات؟"
+}
+```
+
+#### Response (200 OK)
+
+```json
+{
+    "status": "success",
+    "ai_response": "يجب عليك دراسة مادة البرمجة (CS 112) قبل دراسة هياكل البيانات."
 }
 ```
 

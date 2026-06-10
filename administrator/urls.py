@@ -4,7 +4,7 @@ from .views import (
     DashboardViewSet, CourseViewSet, UserViewSet, 
     AnnouncementViewSet, MaterialViewSet, ChatViewSet, NotificationViewSet,
     DepartmentViewSet, CourseOfferingViewSet, EnrollmentViewSet,
-    AdminProfileView
+    AdminProfileView, CollegeInstructionsUploadView
 )
 
 router = DefaultRouter()
@@ -27,4 +27,5 @@ router.register(r'dashboard', DashboardViewSet, basename='dashboard')
 urlpatterns = [
     path('', include(router.urls)),
     path('profile/', AdminProfileView.as_view(), name='admin-profile'),
+    path('college-instructions/upload/', CollegeInstructionsUploadView.as_view(), name='admin-instructions-upload'),
 ]
