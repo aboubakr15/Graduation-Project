@@ -212,8 +212,8 @@ class StudentChatBotView(APIView):
                  title=content[:50]
             )
 
-        # Fetch last 10 messages for context
-        history_msgs = conversation.messages.all().order_by('-timestamp')[:10]
+        # Fetch last 20 messages for deeper context (allows building presentations from long question chains)
+        history_msgs = conversation.messages.all().order_by('-timestamp')[:20]
         history = []
         for m in reversed(history_msgs):
             role = "user" if m.role == ChatMessage.Role.USER else "assistant"

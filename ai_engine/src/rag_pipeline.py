@@ -291,13 +291,14 @@ class RAGPipeline:
                 # BUG 1 FIX: Use the latest known blueprint as the base for adjustments
                 blueprint_md = self.generator.adjust_presentation_blueprint_md(
                     blueprint_for_phase2,
-                    question
+                    question,
+                    history=history
                 )
                 return {"answer": blueprint_md, "sources": []}
 
             else:
                 # ── PHASE 1: Generate initial Markdown blueprint ──────────
-                blueprint_md = self.generator.get_presentation_blueprint_md(full_context, question)
+                blueprint_md = self.generator.get_presentation_blueprint_md(full_context, question, history=history)
                 return {"answer": blueprint_md, "sources": []}
 
         # -----------------------------------------------------------------

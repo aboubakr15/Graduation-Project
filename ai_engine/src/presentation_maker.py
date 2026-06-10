@@ -491,25 +491,41 @@ class PresentationMaker:
         title_text = slide_info.get("title", "")
         tb = slide.shapes.add_textbox(Inches(0.35), Inches(0.15), Inches(12.5), Inches(0.85))
         tf = tb.text_frame
+        tf.word_wrap = True
         p  = tf.paragraphs[0]
         p.alignment = PP_ALIGN.CENTER
         run = p.add_run()
         run.text = title_text
         run.font.name  = self.FONT_TITLE
-        run.font.size  = Pt(36)
+        
+        # Dynamic sizing for long titles to prevent overlap
+        title_len = len(title_text)
+        if title_len > 70:
+            run.font.size = Pt(24)
+            divider_y = 1.15
+            content_y = 1.3
+        elif title_len > 45:
+            run.font.size = Pt(28)
+            divider_y = 1.05
+            content_y = 1.2
+        else:
+            run.font.size = Pt(36)
+            divider_y = 1.05
+            content_y = 1.2
+            
         run.font.bold  = True
         run.font.color.rgb = self.COLOR_TITLE
 
         # Thin divider — centered under title, width scales with title length
-        char_width_inches = 0.22
-        divider_w = min(max(len(title_text) * char_width_inches, 1.5), 10.0)
+        char_width_inches = 0.22 if title_len <= 45 else 0.15
+        divider_w = min(max(title_len * char_width_inches, 1.5), 10.0)
         divider_left = (prs.slide_width.inches - divider_w) / 2
-        self._add_rect(slide, Inches(divider_left), Inches(1.05), Inches(divider_w), Inches(0.02), self.COLOR_ACCENT)
+        self._add_rect(slide, Inches(divider_left), Inches(divider_y), Inches(divider_w), Inches(0.02), self.COLOR_ACCENT)
 
         # Content bullets
         content = self._coerce_list(slide_info.get("content", []))
         if content:
-            tb2 = slide.shapes.add_textbox(Inches(0.5), Inches(1.2), Inches(12.0), Inches(6.0))
+            tb2 = slide.shapes.add_textbox(Inches(0.5), Inches(content_y), Inches(12.0), Inches(6.0))
             tf2 = tb2.text_frame
             tf2.word_wrap = True
             for i, point in enumerate(content):

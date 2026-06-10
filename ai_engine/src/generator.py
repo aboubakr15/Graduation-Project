@@ -188,7 +188,7 @@ class Generator:
     # ★  MARKDOWN PRESENTATION ARCHITECT (replaces JSON-based flow)  ★
     # ================================================================== #
 
-    def get_presentation_blueprint_md(self, content: str, user_request: str) -> str:
+    def get_presentation_blueprint_md(self, content: str, user_request: str, history: list = None) -> str:
         """
         Phase 1 — Blueprint (Markdown format).
         Forces the LLM to output a Markdown outline using:
@@ -200,16 +200,23 @@ class Generator:
         if not USE_GROQ or not GROQ_AVAILABLE or not self.client:
             return "Error: LLM not available for blueprint generation."
 
+        history_str = ""
+        if history:
+            # Get the last 20 messages of conversation to provide deep context (e.g., if user generated questions over multiple prompts)
+            recent_history = history[-20:]
+            history_str = "\n[CONVERSATION CONTEXT (Previous Messages)]\n"
+            for msg in recent_history:
+                history_str += f"{msg['role'].upper()}: {msg['content']}\n"
+
         prompt = f"""You are a Professional Presentation Architect.
 Your ONLY job is to output a detailed slide-by-slide OUTLINE for a presentation.
 NEVER explain, converse, or add any text outside the slide blocks.
 
-MINIMUM REQUIREMENTS — MANDATORY:
-- Generate AT LEAST 6 to 8 slides (not counting the cover and Thank You slides).
-- Each slide MUST have a clear, specific title.
-- Each slide MUST have 2 to 4 SHORT, meaningful bullet points that cover the topic.
-- If the user requests an example or code, include dedicated slides for it (e.g., '# Example: Stack Push Operation', '# Code Solution', '# Step-by-Step Walkthrough').
-- Do NOT combine everything into one or two slides.
+MINIMUM REQUIREMENTS & RULES:
+1. Usually generate AT LEAST 6 to 8 slides (not counting the cover and Thank You slides).
+2. Each slide MUST have a clear, specific title.
+3. Each slide MUST have 2 to 4 SHORT, meaningful bullet points that cover the topic.
+4. If the user requests an example or code, include dedicated slides for it.
 
 OUTPUT FORMAT — FOLLOW EXACTLY:
 - Separate each slide with: <!-- slide -->
@@ -219,54 +226,18 @@ OUTPUT FORMAT — FOLLOW EXACTLY:
 - LAST slide = # Thank You with bullet: - Questions & Discussion
 - NO extra text, NO markdown fences, NO explanation.
 
-EXAMPLE (follow this structure — notice multiple detailed slides):
-# Introduction to Stacks
-- A fundamental data structure in Computer Science
-- Used in function calls, undo operations, and parsing
-
-<!-- slide -->
-
-# What is a Stack?
-- A Last-In, First-Out (LIFO) data structure
-- Elements are added and removed from the top
-- Analogy: A stack of plates
-
-<!-- slide -->
-
-# Stack Operations
-- Push: Add element to top
-- Pop: Remove element from top
-- Peek: View top element without removing
-- isEmpty: Check if stack is empty
-
-<!-- slide -->
-
-# Example: Stack in Action
-- Push 10, Push 20, Push 30
-- Stack state: [10, 20, 30] → top is 30
-- Pop returns 30, stack becomes [10, 20]
-
-<!-- slide -->
-
-# Code Solution (Array Implementation)
-- Declare array and top pointer
-- Push: arr[++top] = value
-- Pop: return arr[top--]
-
-<!-- slide -->
-
-# Thank You
-- Questions & Discussion
-
-NOW generate the full blueprint for this request. Remember: minimum 6 content slides.
-
 [CONTENT FROM COURSE MATERIALS]
 {content[:5000]}
-
+{history_str}
 [USER REQUEST]
 {user_request}
 
-Blueprint (Markdown only, minimum 6 content slides, no extra text):"""
+CRITICAL INSTRUCTION FOR THIS REQUEST:
+If the [USER REQUEST] asks you to put specific questions or items from the [CONVERSATION CONTEXT] into a presentation, you MUST STRICTLY build the presentation ONLY out of those items. Do NOT generate a general presentation about the topic from the [CONTENT FROM COURSE MATERIALS]. Create exactly one slide per item/question (e.g. "Q1: What is De Morgan's Law?").
+IMPORTANT FOR QUESTIONS: If the question has multiple choices (A, B, C, D, etc.), you MUST include every choice as a bullet point on the slide, and explicitly state the correct answer at the bottom (e.g. "- Correct Answer: C").
+In this specific case, ignore the 6-slide minimum.
+
+NOW generate the full blueprint based on the rules and instructions above:"""
 
         try:
             response = self.client.chat.completions.create(
@@ -280,12 +251,20 @@ Blueprint (Markdown only, minimum 6 content slides, no extra text):"""
             logger.error(f"Blueprint (MD) generation failed: {e}")
             return "Error generating presentation blueprint."
 
-    def adjust_presentation_blueprint_md(self, previous_blueprint: str, user_request: str) -> str:
+    def adjust_presentation_blueprint_md(self, previous_blueprint: str, user_request: str, history: list = None) -> str:
         """
         Refinement — Adjust the existing blueprint based on user's feedback.
         """
         if not USE_GROQ or not GROQ_AVAILABLE or not self.client:
             return "Error: LLM not available for blueprint adjustment."
+
+        history_str = ""
+        if history:
+            # Get the last 20 messages of conversation to provide deep context
+            recent_history = history[-20:]
+            history_str = "\n[CONVERSATION CONTEXT (Previous Messages)]\n"
+            for msg in recent_history:
+                history_str += f"{msg['role'].upper()}: {msg['content']}\n"
 
         prompt = f"""You are a Professional Presentation Architect.
 Your ONLY job is to modify the existing presentation outline based on the user's request.
@@ -293,7 +272,7 @@ NEVER explain how to do it or talk to the user.
 
 Here is the EXISTING COMPLETE presentation outline (you MUST keep ALL existing slides):
 {previous_blueprint}
-
+{history_str}
 User request for adjustments:
 {user_request}
 
@@ -355,7 +334,7 @@ OUTPUT FORMAT — YOU MUST FOLLOW THIS EXACTLY:
 - Do NOT wrap the output in ```markdown``` fences.
 
 SPECIAL RULE FOR QUESTION/QUIZ SLIDES:
-If a slide title contains a question (e.g., "Q1:", "Question", "?"), you MUST present the question prominently and then list the answer options or the answer as bullets. Do NOT replace the question with generic topic content.
+If a slide title contains a question (e.g., "Q1:", "Question", "?") or the slide is about a quiz question, you MUST present the question prominently, followed by ALL the multiple choice options (A, B, C, D) as separate bullets, and finally state the correct answer. Do NOT replace the question with generic topic content. Do NOT omit the choices.
 
 SPECIAL RULE FOR CODE SLIDES:
 If a slide title contains "Code", "Implementation", "Example", "Algorithm", "Snippet", "Solution", or "Walkthrough",
