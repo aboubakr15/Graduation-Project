@@ -239,12 +239,18 @@ SIMPLE_JWT = {
 }
 
 # ── Channels / WebSockets Configuration ──
-if os.environ.get('REDIS_URL'):
+redis_url = os.environ.get('REDIS_URL')
+if redis_url:
+    if '?' not in redis_url:
+        redis_url += '?health_check_interval=20&socket_keepalive=1'
+    elif 'health_check_interval' not in redis_url:
+        redis_url += '&health_check_interval=20&socket_keepalive=1'
+        
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
             'CONFIG': {
-                "hosts": [os.environ.get('REDIS_URL')],
+                "hosts": [redis_url],
             },
         },
     }
