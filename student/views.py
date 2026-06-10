@@ -226,6 +226,69 @@ class StudentChatBotView(APIView):
             content=content
         )
 
+        # ── Short-circuit: profile & enrollment questions ────────────────
+        # These questions are answered directly from the database,
+        # so they NEVER go through the RAG pipeline and never get a disclaimer.
+        enrollment_triggers = [
+            "my courses", "my registered courses", "enrolled courses", "enrolled in",
+            "what courses", "which courses", "my subjects", "my classes",
+            "كورساتي", "موادي", "المواد المسجلة", "ما المواد", "ما الكورسات",
+            "ما هي موادي", "ما هي كورساتي", "المسجل عليه",
+        ]
+        content_lower = content.lower()
+        is_enrollment_question = any(trigger in content_lower for trigger in enrollment_triggers)
+
+        if is_enrollment_question:
+            all_enrollments = Enrollment.objects.filter(
+                student=request.user,
+                status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED],
+            ).select_related('course_offering__course')
+
+            active = [e for e in all_enrollments if e.status == Enrollment.Status.ACTIVE]
+            completed = [e for e in all_enrollments if e.status == Enrollment.Status.COMPLETED]
+
+            has_arabic = any('\u0600' <= c <= '\u06FF' for c in content)
+            if has_arabic:
+                lines = ["بالطبع! إليك المواد المسجلة لديك:"]
+                if active:
+                    lines.append("\n**المواد الحالية (نشطة):**")
+                    for e in active:
+                        lines.append(f"- {e.course_offering.course.name} ({e.course_offering.course.code})")
+                if completed:
+                    lines.append("\n**المواد المكتملة:**")
+                    for e in completed:
+                        lines.append(f"- {e.course_offering.course.name} ({e.course_offering.course.code})")
+                if not active and not completed:
+                    lines = ["لا توجد مواد مسجلة لديك حالياً."]
+            else:
+                lines = ["Here are your registered courses:"]
+                if active:
+                    lines.append("\n**Active Courses:**")
+                    for e in active:
+                        lines.append(f"- {e.course_offering.course.name} ({e.course_offering.course.code})")
+                if completed:
+                    lines.append("\n**Completed Courses:**")
+                    for e in completed:
+                        lines.append(f"- {e.course_offering.course.name} ({e.course_offering.course.code})")
+                if not active and not completed:
+                    lines = ["You are not enrolled in any courses yet."]
+
+            direct_answer = "\n".join(lines)
+            ai_msg = ChatMessage.objects.create(
+                conversation=conversation,
+                role=ChatMessage.Role.ASSISTANT,
+                content=direct_answer,
+                sources_used=[],
+                was_from_rag=False,
+            )
+            conversation.save()
+            return Response({
+                "conversation_id": conversation.id,
+                "user_message": ChatMessageSerializer(user_msg).data,
+                "ai_message": ChatMessageSerializer(ai_msg).data,
+            })
+        # ── End short-circuit ─────────────────────────────────────────────
+
         # Execute AI Query
         selected_course = course_offering.course.code if course_offering else None
         

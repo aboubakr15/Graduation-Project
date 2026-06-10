@@ -334,20 +334,28 @@ Updated Blueprint (full, including all original slides, no extra text):"""
             return ""
 
         prompt = f"""You are a Professional Presentation Architect.
-Expand the approved outline below into a FULL slide deck with rich, educational content.
+Your job is to expand the [APPROVED OUTLINE] below into a FULL slide deck.
+
+GOLDEN RULE: The [APPROVED OUTLINE] is the LAW. You MUST:
+1. Include EVERY slide that appears in the outline — no additions, no deletions.
+2. Keep each slide's EXACT title from the outline — word for word.
+3. Keep the EXACT purpose of each slide. If a slide is a question, keep it as a question. If a slide is a definition, keep it as a definition. If a slide is a code example, keep it as code.
+4. Use [CONTENT SOURCE] ONLY to fill in factual details and expand bullet points. NEVER use it to change slide titles or replace slide topics.
 
 OUTPUT FORMAT — YOU MUST FOLLOW THIS EXACTLY:
 - Separate each slide with the HTML comment: <!-- slide -->
-- Each slide block starts with: # Slide Title
+- Each slide block starts with: # Slide Title  (must match the outline title exactly)
 - Each content slide has 4-6 bullets. Use: - bullet
 - For NORMAL slides: each bullet MUST be a COMPLETE EDUCATIONAL SENTENCE of 10-18 words.
   BAD:  "- Represents program in memory"
   GOOD: "- The text segment stores the compiled machine code of the program that the CPU executes."
 - The FIRST slide (cover) keeps only the title and 1-line subtitle bullet.
-- The LAST slide MUST EXACTLY match what is in the [APPROVED OUTLINE] for the last slide. Do NOT force "Questions & Discussion" if it's not in the outline.
-- STICK TO SOURCE: only use ideas from [CONTENT SOURCE]. Do NOT add external topics.
-- Do NOT add any extra text, explanations, headers outside the slide blocks.
+- The LAST slide MUST EXACTLY match what is in the [APPROVED OUTLINE] for the last slide.
+- Do NOT add any extra text, explanations, or headers outside the slide blocks.
 - Do NOT wrap the output in ```markdown``` fences.
+
+SPECIAL RULE FOR QUESTION/QUIZ SLIDES:
+If a slide title contains a question (e.g., "Q1:", "Question", "?"), you MUST present the question prominently and then list the answer options or the answer as bullets. Do NOT replace the question with generic topic content.
 
 SPECIAL RULE FOR CODE SLIDES:
 If a slide title contains "Code", "Implementation", "Example", "Algorithm", "Snippet", "Solution", or "Walkthrough",
@@ -768,6 +776,70 @@ Latest Question: {question}"""
             logger.error(f"Intent detection failed: {e}")
             return "general_question"
 
+
+    def is_enrolled_course_topic(self, question: str, enrolled_courses: list) -> bool:
+        """
+        Uses an LLM call to check if the question is academically related
+        to any of the student's enrolled/completed courses.
+        Returns True  → topic is in enrolled courses (no disclaimer needed)
+        Returns False → topic is outside enrolled courses (disclaimer needed)
+        """
+        if not enrolled_courses:
+            return False
+        # Deduplicate and take only readable names/codes (skip very short single-letter prefixes)
+        readable = list({c for c in enrolled_courses if len(c) > 2})[:20]
+        courses_str = ", ".join(readable)
+        prompt = (
+            f"A student is enrolled in the following courses: {courses_str}\n"
+            f"Is the following question academically related to any of these courses?\n"
+            f"Question: {question}\n"
+            f"Answer with only YES or NO."
+        )
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=5,
+                temperature=0.0,
+            )
+            ans = response.choices[0].message.content.strip().upper()
+            return "YES" in ans
+        except Exception as e:
+            logger.error(f"is_enrolled_course_topic failed: {e}")
+            return True  # Default: assume enrolled topic to avoid false disclaimers
+
+    def generate_enrolled_topic_answer(self, question: str, history: list = None) -> str:
+        """
+        Answer a question from general knowledge WITHOUT any disclaimer.
+        Used when the topic is related to the student's enrolled courses but
+        the specific material wasn't uploaded to the vector store yet.
+        """
+        has_arabic = any("\u0600" <= ch <= "\u06FF" for ch in question)
+        if has_arabic:
+            sys_prompt = (
+                "أنت مساعد تعليمي ذكي. أجب على السؤال التالي بشكل مفيد ومنظم واحترافي. "
+                "يمكنك الإجابة من معرفتك العامة إذا كان السؤال أكاديمياً. "
+                "لا تضع أي تحذير أو إخلاء مسؤولية في بداية إجابتك."
+            )
+        else:
+            sys_prompt = (
+                "You are a smart educational assistant. Answer the following question in a helpful, "
+                "well-structured, and accurate way from your academic knowledge. "
+                "Do NOT add any disclaimer or warning at the beginning of your answer."
+            )
+        messages = [{"role": "system", "content": sys_prompt}]
+        if history:
+            for turn in history[-3:]:
+                messages.append({"role": turn["role"], "content": turn["content"]})
+        messages.append({"role": "user", "content": question})
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model, messages=messages, max_tokens=1024, temperature=0.5
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"generate_enrolled_topic_answer failed: {e}")
+            return "Error: Failed to generate a response."
 
     def generate_general_answer(self, question: str, history: list = None) -> str:
         """Agent 4: General Fallback - يجاوب من دماغه مع Disclaimer."""

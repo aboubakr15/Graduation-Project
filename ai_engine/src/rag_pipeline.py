@@ -420,16 +420,14 @@ class RAGPipeline:
         # -----------------------------------------------------------------
         if not documents:
             logger.warning("No documents retrieved from vector store.")
-            route = self.generator.route_query(question)
-            if route == "college_specific":
-                ans = "عذراً، لم أجد هذه المعلومات في المحاضرات المسجلة عليك. يرجى التواصل مع قسم الكلية أو السكرتارية للتأكد." if has_arabic else "Sorry, I couldn't find this info in your enrolled courses. Please contact your department."
-                return {"answer": ans, "sources": []}
-            else:
-                if context_parts:
-                    full_context = "\n\n---\n\n".join(context_parts)
-                    return {"answer": self.generator.generate_answer(question, full_context, is_youtube=True, history=history), "sources": []}
-                ans = self.generator.generate_general_answer(question, history)
-                return {"answer": ans, "sources": []}
+            # No material found for this question in enrolled course data.
+            # Rule: not found in enrolled courses → general knowledge WITH disclaimer.
+            if context_parts:  # YouTube context exists
+                full_context = "\n\n---\n\n".join(context_parts)
+                return {"answer": self.generator.generate_answer(question, full_context, is_youtube=True, history=history), "sources": []}
+            logger.info("No enrolled course docs found — routing to general knowledge with disclaimer.")
+            ans = self.generator.generate_general_answer(question, history)
+            return {"answer": ans, "sources": []}
 
         # -----------------------------------------------------------------
         # 6. تجهيز Context من المحاضرات
@@ -561,7 +559,7 @@ class RAGPipeline:
                 return {"answer": ans, "sources": []}
             
             else:
-                # سؤال عام، والمحاضرات مشتغطيه
+                # YouTube fallback
                 raw_yt_transcript = youtube_data.get('transcript') if youtube_data else None
                 if youtube_data and raw_yt_transcript and "[ERROR:" not in str(raw_yt_transcript):
                     logger.info("Falling back to YouTube Transcript...")
@@ -569,8 +567,8 @@ class RAGPipeline:
                     answer = self.generator.generate_answer(question, yt_context, is_youtube=True, history=history)
                     return {"answer": answer, "sources": []}
 
-                # Docs from enrolled courses don't answer the question specifically.
-                # Fall back to general knowledge with disclaimer.
-                logger.info("Routing to General Knowledge Generator (with disclaimer)...")
-                ans = self.generator.generate_general_answer(question, history)
-                return {"answer": ans, "sources": []}
+                # Evaluator said "No": answer not found in enrolled course materials.
+                # Rule: not found in enrolled courses → general knowledge WITH disclaimer.
+                logger.info("Evaluator: No. Routing to general knowledge with disclaimer.")
+                answer = self.generator.generate_general_answer(question, history)
+                return {"answer": answer, "sources": []}
