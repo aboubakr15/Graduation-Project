@@ -440,7 +440,9 @@ class StudentCourseChatListView(APIView):
 
         msgs = CourseChatMessage.objects.filter(
             course_offering=offering
-        ).order_by('created_at').select_related('sender')[:100]
+        ).order_by('-created_at').select_related('sender')[:100]
+        msgs = list(msgs)
+        msgs.reverse()
         return Response(CourseChatMessageSerializer(msgs, many=True).data)
 
     def post(self, request, pk):
