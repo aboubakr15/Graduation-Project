@@ -709,8 +709,14 @@ class SubmissionGradeView(APIView):
                 student=enrollment.student,
                 assignment__course_offering=enrollment.course_offering,
                 status=StudentSubmission.Status.GRADED
-            )
-            earned_points = sum(float(s.grade or 0) for s in submissions)
+            ).select_related('assignment')
+            
+            earned_points = 0
+            for s in submissions:
+                grade_percentage = float(s.grade or 0)
+                assignment_points = float(s.assignment.total_points)
+                earned_points += (grade_percentage / 100) * assignment_points
+                
             enrollment.grade = (earned_points / total_points) * 100
             enrollment.save()
 

@@ -516,10 +516,13 @@ class StudentSubmissionView(APIView):
         if uploaded_file:
             defaults['file'] = uploaded_file
 
-        submission, created = StudentSubmission.objects.update_or_create(
+        if StudentSubmission.objects.filter(student=request.user, assignment=assignment).exists():
+            return Response({"error": "You have already submitted a solution for this assignment."}, status=status.HTTP_400_BAD_REQUEST)
+
+        submission = StudentSubmission.objects.create(
             student=request.user,
             assignment=assignment,
-            defaults=defaults
+            **defaults
         )
         return Response(StudentSubmissionSerializer(submission).data, status=status.HTTP_201_CREATED)
 
