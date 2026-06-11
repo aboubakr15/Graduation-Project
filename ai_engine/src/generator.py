@@ -355,15 +355,15 @@ If a slide title contains a question (e.g., "Q1:", "Question", "?") or the slide
 
 SPECIAL RULE FOR CODE SLIDES:
 If a slide title contains "Code", "Implementation", "Example", "Algorithm", "Snippet", "Solution", or "Walkthrough",
-you MUST include the ACTUAL code implementation using a fenced code block, like this:
-- Brief explanation of what the code does (1 sentence)
+you MUST format the slide EXACTLY like this — no extra bullets before or after the code block:
 ```python
-# actual working code here
+# actual working, complete code here
 def example():
     pass
 ```
-- Brief explanation of the output or behavior
-Do NOT convert code into plain English sentences on code slides. Provide real, runnable code.
+- One sentence explaining what the code demonstrates or its expected output.
+DO NOT add any bullet point like "- Code Snippet:", "- Implementation:", or "- Here is the code:" before the fenced code block.
+DO NOT add a title label bullet. The code block itself IS the main content. Only ONE explanation bullet after the code block is allowed.
 
 CRITICAL FINAL REMINDER: YOU MUST WRITE FULL 2-3 SENTENCE PARAGRAPHS FOR EACH NORMAL BULLET POINT. DO NOT JUST COPY THE SHORT OUTLINE.
 
@@ -434,6 +434,21 @@ Full Markdown deck (no extra text):"""
                 slide["content"] = [slide["content"]]
             elif not isinstance(slide.get("content"), list):
                 slide["content"] = []
+            
+            # If this slide has a code_block, drop any "label" bullets that are
+            # just headings for the code (e.g. "Code Snippet:", "Implementation:").
+            # These are artefacts from the LLM adding a bullet before the fence.
+            if slide.get("code_block"):
+                _CODE_LABEL_PATTERNS = (
+                    "code snippet", "implementation", "here is the code",
+                    "here's the code", "the code", "code:", "example code",
+                    "code below", "following code", "code implementation",
+                )
+                slide["content"] = [
+                    b for b in slide["content"]
+                    if not any(pat in b.lower() for pat in _CODE_LABEL_PATTERNS)
+                ]
+
             # Ensure notes is a string
             if not isinstance(slide.get("notes"), str):
                 slide["notes"] = ""

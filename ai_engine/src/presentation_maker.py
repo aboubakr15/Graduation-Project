@@ -200,6 +200,21 @@ class PresentationMaker:
             if not title and not bullets and not code_block:
                 continue
 
+            # If this slide has a code_block, strip any bullet that is just a
+            # label for the code (e.g. "Code Snippet:", "Here is the code:").
+            # These are LLM artefacts that cause the code to appear BOTH as a
+            # text bullet AND as a rendered PNG image on the same slide.
+            if code_block:
+                _CODE_LABEL_PATTERNS = (
+                    "code snippet", "implementation:", "here is the code",
+                    "here's the code", "the following code", "code below",
+                    "example code", "code implementation", "following code",
+                )
+                bullets = [
+                    b for b in bullets
+                    if not any(pat in b.lower() for pat in _CODE_LABEL_PATTERNS)
+                ]
+
             slide_dict = {
                 "type": "content",
                 "title": title or "Slide",
@@ -210,6 +225,7 @@ class PresentationMaker:
                 slide_dict["code_block"] = code_block
 
             slides.append(slide_dict)
+
 
         if not slides:
             return slides
