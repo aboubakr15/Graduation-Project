@@ -215,7 +215,7 @@ NEVER explain, converse, or add any text outside the slide blocks.
 MINIMUM REQUIREMENTS & RULES:
 1. Usually generate AT LEAST 6 to 8 slides (not counting the cover and Thank You slides).
 2. Each slide MUST have a clear, specific title.
-3. Each slide MUST have 2 to 4 SHORT, meaningful bullet points that cover the topic.
+3. Each slide MUST have 2 to 4 DESCRIPTIVE bullet points. Do not just use single keywords or names; use a full phrase that outlines what should be explained on that slide.
 4. If the user requests an example or code, include dedicated slides for it.
 
 OUTPUT FORMAT — FOLLOW EXACTLY:
@@ -232,12 +232,16 @@ OUTPUT FORMAT — FOLLOW EXACTLY:
 [USER REQUEST]
 {user_request}
 
-CRITICAL INSTRUCTION FOR THIS REQUEST:
-If the [USER REQUEST] asks you to put specific questions or items from the [CONVERSATION CONTEXT] into a presentation, you MUST STRICTLY build the presentation ONLY out of those items. Do NOT generate a general presentation about the topic from the [CONTENT FROM COURSE MATERIALS]. 
-RULES FOR QUESTION PRESENTATIONS:
-1. The FIRST slide MUST be a generic cover slide (e.g., "# Quiz Presentation", "- Topic: De Morgan's Law"). Do NOT put a question on the cover slide.
+CRITICAL INSTRUCTION FOR THIS REQUEST (CHOOSE ONE PATH BASED ON USER REQUEST):
+
+PATH A - NORMAL PRESENTATION (Default):
+If the [USER REQUEST] asks for a presentation about a topic, lecture, or video, you MUST use the [CONTENT FROM COURSE MATERIALS] to generate a standard educational presentation explaining the topic. Follow the 6-slide minimum.
+
+PATH B - QUIZ/QUESTIONS PRESENTATION (Only if explicitly requested):
+If the [USER REQUEST] explicitly asks you to put specific questions/quiz items from the [CONVERSATION CONTEXT] into a presentation, you MUST STRICTLY build the presentation ONLY out of those questions. Do NOT generate a general explanation.
+1. The FIRST slide MUST be a generic cover slide (e.g., "# Quiz Presentation"). Do NOT put a question on the cover slide.
 2. Put the FIRST question on the second slide, the SECOND question on the third slide, and so on (exactly one slide per question).
-3. If the question has multiple choices (A, B, C, D, etc.), you MUST include every choice as a bullet point on the slide, and explicitly state the correct answer at the bottom (e.g. "- Correct Answer: C").
+3. The actual question text MUST be the first bullet point (e.g. "- Question: What is PCA?"). Then, if the question has multiple choices, include every choice as a separate bullet point, and explicitly state the correct answer at the bottom (e.g. "- Correct Answer: C"). Do NOT leave the question as plain text.
 In this specific case, ignore the 6-slide minimum.
 
 NOW generate the full blueprint based on the rules and instructions above:"""
@@ -283,6 +287,8 @@ CRITICAL RULES:
 - Output the FULL updated blueprint including ALL original slides PLUS any additions/changes.
 - Do NOT drop any existing slides unless the user explicitly asks to remove them.
 - If the user asks to add slides (e.g., "add an example", "add code"), create DEDICATED slides for each request with 2-4 meaningful bullet points each.
+- IMPORTANT FOR QUESTIONS: If you add questions, you MUST create a separate, dedicated slide for EACH question. Do NOT put multiple questions on one slide.
+- For each question slide, the question text MUST be the first bullet point (e.g., "- Question: What is PCA?"). Then, include EVERY multiple choice option as a separate bullet point, and explicitly state the correct answer at the bottom (e.g., "- Correct Answer: A"). Do NOT omit choices or the question text.
 - Append new slides BEFORE the final '# Thank You' slide.
 - Each slide MUST have a clear title and 2-4 specific, descriptive bullet points.
 - Separate each slide with: <!-- slide -->
@@ -318,26 +324,34 @@ Updated Blueprint (full, including all original slides, no extra text):"""
         prompt = f"""You are a Professional Presentation Architect.
 Your job is to expand the [APPROVED OUTLINE] below into a FULL slide deck.
 
-GOLDEN RULE: The [APPROVED OUTLINE] is the LAW. You MUST:
+[CONTENT SOURCE]
+{content[:5000]}
+
+[APPROVED OUTLINE]
+{approved_blueprint}
+
+GOLDEN RULE: The [APPROVED OUTLINE] is the LAW for structure, but you MUST EXPAND the content dramatically.
 1. Include EVERY slide that appears in the outline — no additions, no deletions.
-2. Keep each slide's EXACT title from the outline — word for word.
-3. Keep the EXACT purpose of each slide. If a slide is a question, keep it as a question. If a slide is a definition, keep it as a definition. If a slide is a code example, keep it as code.
-4. Use [CONTENT SOURCE] ONLY to fill in factual details and expand bullet points. NEVER use it to change slide titles or replace slide topics.
+2. Keep each slide's EXACT title from the outline.
+3. For the content of each slide, act as if the user asked you "Explain [Slide Title]" as a normal chatbot question. You MUST expand the short outline bullets into highly detailed, informative content using the [CONTENT SOURCE], explaining the concept deeply just like you would in a normal chatbot response.
 
 OUTPUT FORMAT — YOU MUST FOLLOW THIS EXACTLY:
 - Separate each slide with the HTML comment: <!-- slide -->
-- Each slide block starts with: # Slide Title  (must match the outline title exactly)
-- Each content slide has 4-6 bullets. Use: - bullet
-- For NORMAL slides: each bullet MUST be a COMPLETE EDUCATIONAL SENTENCE of 10-18 words.
+- Each slide block starts with: # Slide Title
+- Each content slide MUST have 3 to 5 detailed explanatory points. Use: - point
+- For NORMAL slides: instead of short bullet points, each `- ` MUST contain a FULL PARAGRAPH (2-3 sentences) explaining the concept in detail to a student. Act as if you are answering "Explain this to me".
   BAD:  "- Represents program in memory"
-  GOOD: "- The text segment stores the compiled machine code of the program that the CPU executes."
+  GOOD: "- The text segment is a crucial part of memory that securely stores the compiled machine code instructions. When the program runs, the CPU reads these instructions sequentially to execute the program's logic."
 - The FIRST slide (cover) keeps only the title and 1-line subtitle bullet.
 - The LAST slide MUST EXACTLY match what is in the [APPROVED OUTLINE] for the last slide.
 - Do NOT add any extra text, explanations, or headers outside the slide blocks.
 - Do NOT wrap the output in ```markdown``` fences.
 
 SPECIAL RULE FOR QUESTION/QUIZ SLIDES:
-If a slide title contains a question (e.g., "Q1:", "Question", "?") or the slide is about a quiz question, you MUST present the question prominently, followed by ALL the multiple choice options (A, B, C, D) as separate bullets, and finally state the correct answer. Do NOT replace the question with generic topic content. Do NOT omit the choices.
+If a slide title contains a question (e.g., "Q1:", "Question", "?") or the slide is about a quiz question, you MUST format it carefully:
+1. The question text MUST be the first bullet point (e.g. "- Question: What is PCA?"). Do NOT leave it as plain text.
+2. Follow the question bullet with ALL the multiple choice options (A, B, C, D) as separate bullets.
+3. Finally state the correct answer as the last bullet. Do NOT replace the question with generic topic content. Do NOT omit the choices.
 
 SPECIAL RULE FOR CODE SLIDES:
 If a slide title contains "Code", "Implementation", "Example", "Algorithm", "Snippet", "Solution", or "Walkthrough",
@@ -351,11 +365,7 @@ def example():
 - Brief explanation of the output or behavior
 Do NOT convert code into plain English sentences on code slides. Provide real, runnable code.
 
-[CONTENT SOURCE]
-{content[:5000]}
-
-[APPROVED OUTLINE]
-{approved_blueprint}
+CRITICAL FINAL REMINDER: YOU MUST WRITE FULL 2-3 SENTENCE PARAGRAPHS FOR EACH NORMAL BULLET POINT. DO NOT JUST COPY THE SHORT OUTLINE.
 
 Full Markdown deck (no extra text):"""
 
@@ -364,7 +374,7 @@ Full Markdown deck (no extra text):"""
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=3000,
-                temperature=0.3,
+                temperature=0.5,
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
@@ -611,27 +621,27 @@ Student Question: {question}"""
 
     def rewrite_query_with_memory(self, question: str, history: list) -> str:
         """Agent 1: Memory - يحول السؤال لسؤال مستقل بناءً على السياق."""
-        if not history:
-            return question
         
         has_arabic = any("\u0600" <= ch <= "\u06FF" for ch in question)
         
         if has_arabic:
-            prompt = """أنت مساعد ذكي مهمتك الوحيدة هي إعادة صياغة أسئلة المستخدم.
-بناءً على محادثة المستخدم الحالية، قم بصياغة السؤال الأخير كـ 'سؤال مستقل' بحيث يمكن فهمه بدون باقي المحادثة.
-قواعد صارمة:
-1. ممنوع تماماً الإجابة على السؤال.
-2. ممنوع إدراج أي نص من إجابات المساعد السابقة في مخرجاتك.
-3. أخرج السؤال المستقل فقط بدون أي كلام إضافي.
+            prompt = """أنت مساعد ذكي مهمتك الوحيدة هي إعادة صياغة أسئلة المستخدم للبحث في قاعدة بيانات باللغة الإنجليزية.
+قواعد صارمة جداً:
+1. يجب عليك ترجمة السؤال إلى اللغة الإنجليزية (لأن جميع الملفات والمحاضرات باللغة الإنجليزية، والبحث بالعربي لن يجد شيئاً).
+2. قم بحذف أي كلمات حشو أو أسماء مواد من البحث. (مثلاً: إذا سأل "اشرح الانحدار الخطي من مادة تعلم الآلة"، يجب أن يكون المخرج فقط "Explain Linear Regression").
+3. ممنوع تماماً الإجابة على السؤال.
+4. ممنوع إدراج أي نص من إجابات المساعد السابقة.
+5. أخرج السؤال المستقل المترجم فقط (باللغة الإنجليزية) بدون أي كلام إضافي.
 
 السؤال الأخير:"""
         else:
-            prompt = """You are a query rewriter. Your ONLY job is to rewrite the user's latest question.
+            prompt = """You are a search query translator and rewriter. Your ONLY job is to rewrite the user's latest question so it can be searched in an English database.
 Based on the chat history, rewrite the latest question as a standalone question that can be understood without the conversation history.
-STRICT RULES:
-1. DO NOT answer the question.
-2. DO NOT include previous assistant responses in your output.
-3. Output EXACTLY ONE LINE: the rewritten question only.
+
+CRITICAL RULES:
+1. DROP ALL conversational filler and course names! For example, if the user asks "Explain Linear Regression from Machine Learning subject", you MUST output ONLY: "Explain Linear Regression". (The system filters by course automatically, so including the course name breaks the exact match search).
+2. DO NOT answer the question.
+3. Output EXACTLY ONE LINE: the standalone, English rewritten question only.
 
 Latest question:"""
 
@@ -662,7 +672,7 @@ Latest question:"""
 أجب بكلمة واحدة فقط: Yes أو No.
  
 السؤال: {question}
-المحتوى: {context[:2000]}"""
+المحتوى: {context[:16000]}"""
         else:
             prompt = f"""You are an academic assistant. Look at the student's question and the retrieved lecture content.
 Assume this content is already verified to be from the correct course.
@@ -672,7 +682,7 @@ If it contains the answer, a partial answer, general concepts from the lecture, 
 Output EXACTLY one word: Yes or No.
 
 Question: {question}
-Context: {context[:2000]}"""
+Context: {context[:16000]}"""
 
         try:
             response = self.client.chat.completions.create(

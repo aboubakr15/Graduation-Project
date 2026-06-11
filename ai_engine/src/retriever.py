@@ -118,8 +118,18 @@ class Retriever:
         # ---- Step 1: Dense retrieval with Course Filtering --------
         where_filter = None
         if user_courses:
-            # Clean course codes for metadata matching
-            clean_codes = [c.upper().strip() for c in user_courses if c.strip()]
+            # Clean course codes for metadata matching and add space variations (e.g. "AI330" <-> "AI 330")
+            clean_codes = []
+            import re
+            for c in user_courses:
+                if not c.strip(): continue
+                c_upper = c.upper().strip()
+                clean_codes.append(c_upper)
+                clean_codes.append(c_upper.replace(" ", ""))
+                spaced = re.sub(r'([A-Z]+)(\d+)', r'\1 \2', c_upper)
+                clean_codes.append(spaced)
+            clean_codes = list(set(clean_codes))
+            
             if clean_codes:
                 from qdrant_client.http import models
                 where_filter = models.Filter(
@@ -171,7 +181,7 @@ class Retriever:
         # Normalize allowed codes for robust comparison
         allowed_codes = set()
         if user_courses:
-            allowed_codes = {c.upper().strip() for c in user_courses if c.strip()}
+            allowed_codes = set(clean_codes)
             logger.info(f"STRICT FILTER ACTIVE. Allowed: {allowed_codes}")
 
         for doc in dense_docs:
