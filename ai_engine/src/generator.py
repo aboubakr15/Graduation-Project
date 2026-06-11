@@ -664,22 +664,37 @@ Latest question:"""
         has_arabic = any("\u0600" <= ch <= "\u06FF" for ch in question)
         
         if has_arabic:
-            prompt = f"""أنت مساعد أكاديمي. انظر إلى سؤال الطالب والمحتوى المستخرج من المحاضرات.
-افترض أن هذا المحتوى مأخوذ بالفعل من المادة الصحيحة.
-هل المحتوى يحتوي على أي معلومات يمكن استخدامها للإجابة أو تلخيص موضوع السؤال؟
-إذا كان المحتوى يتحدث عن موضوع مختلف تماماً ولا يمكن استخدامه بأي شكل، أجب بـ "No".
-إذا كان المحتوى يحتوي على الإجابة، أو جزء منها، أو حتى مفاهيم عامة من المحاضرة، أجب بـ "Yes".
-أجب بكلمة واحدة فقط: Yes أو No.
- 
+            prompt = f"""أنت حَكَم أكاديمي. مهمتك التحقق مما إذا كان المحتوى المسترجع يغطي الموضوع الأساسي لسؤال الطالب.
+
+قواعد:
+1. أجب بـ "Yes" إذا كان المحتوى يشرح أو يناقش المفهوم المطلوب بشكل مباشر وذي معنى.
+2. أجب بـ "No" إذا كان المحتوى يذكر فقط كلمات مشتركة بدون تغطية المفهوم المحدد:
+   - مثال: السؤال عن "البيانات الضخمة (Big Data)" والمحتوى يتحدث عن معالجة بيانات عامة أو التعلم الآلي → "No"
+   - مثال: السؤال عن "الشبكات العصبية" والمحتوى يتحدث فقط عن الانحدار الخطي → "No"
+3. أمثلة على القبول ("Yes"):
+   - السؤال عن "الانحدار الخطي" والمحتوى يشرح المعادلة أو دالة الخسارة أو الخوارزمية → "Yes"
+   - السؤال عن "الشبكات العصبية" والمحتوى يشرح الطبقات أو التدريب → "Yes"
+   - السؤال عن "أشجار القرار" والمحتوى يشرح الانتروبيا أو الانقسام → "Yes"
+4. كن معقولاً — إذا كان المحتوى يحتوي على شرح ذي صلة (حتى لو لم يكن شاملاً)، أجب بـ "Yes".
+5. أجب بكلمة واحدة فقط: Yes أو No. لا تضف أي شرح.
+
 السؤال: {question}
 المحتوى: {context[:16000]}"""
         else:
-            prompt = f"""You are an academic assistant. Look at the student's question and the retrieved lecture content.
-Assume this content is already verified to be from the correct course.
-Does this content contain ANY information that could be used to answer or summarize the topic of the question?
-If the content is completely irrelevant and cannot be used at all, output "No".
-If it contains the answer, a partial answer, general concepts from the lecture, or if the question is asking for a general summary of the lecture, output "Yes".
-Output EXACTLY one word: Yes or No.
+            prompt = f"""You are an academic relevance judge. Your job is to check if the retrieved content covers the core topic of the student's question.
+
+RULES:
+1. Output "Yes" if the content directly explains or discusses the concept asked about.
+2. Output "No" if the content only mentions loosely related words without actually covering the specific concept:
+   - Example: Question is about "Big Data" but content only discusses general data preprocessing or ML algorithms → "No"
+   - Example: Question is about "Neural Networks" but content only covers Linear Regression → "No"
+   - Example: Question is about "Blockchain" but content just mentions the word "blocks" in a different context → "No"
+3. Examples that MUST return "Yes":
+   - Question is about "Linear Regression" and content explains the formula, cost function, or optimization → "Yes"
+   - Question is about "Neural Networks" and content explains layers, activation functions, or training → "Yes"
+   - Question is about "Decision Trees" and content explains splits, entropy, or Gini index → "Yes"
+4. Be reasonable — if the content has a meaningful, relevant explanation of the topic (even if not exhaustive), output "Yes".
+5. Output EXACTLY one word: Yes or No. No explanation.
 
 Question: {question}
 Context: {context[:16000]}"""
@@ -779,11 +794,23 @@ Latest Question: {question}"""
         if not enrolled_courses:
             return False
         # Deduplicate and take only readable names/codes (skip very short single-letter prefixes)
-        readable = list({c for c in enrolled_courses if len(c) > 2})[:20]
+        readable = list({c for c in enrolled_courses if len(c) > 4})[:15]
+        if not readable:
+            readable = list({c for c in enrolled_courses if len(c) > 2})[:15]
         courses_str = ", ".join(readable)
         prompt = (
-            f"A student is enrolled in the following courses: {courses_str}\n"
-            f"Is the following question academically related to any of these courses?\n"
+            f"A student is enrolled ONLY in these courses: {courses_str}\n"
+            f"Is the following question specifically about a topic covered in these enrolled courses?\n"
+            f"\n"
+            f"STRICT RULES:\n"
+            f"- Answer YES only if the question's topic is a subject matter taught in one of the listed courses.\n"
+            f"- Answer NO if the question is about a topic from a DIFFERENT course not in the list.\n"
+            f"- Examples:\n"
+            f"  * Enrolled in [Machine Learning] + Question 'What is Big Data?' → NO (Big Data is a separate field)\n"
+            f"  * Enrolled in [Machine Learning] + Question 'Explain Linear Regression' → YES\n"
+            f"  * Enrolled in [Data Structures] + Question 'What is Blockchain?' → NO\n"
+            f"  * Enrolled in [Data Structures] + Question 'How does a Binary Tree work?' → YES\n"
+            f"\n"
             f"Question: {question}\n"
             f"Answer with only YES or NO."
         )
@@ -842,17 +869,15 @@ Latest Question: {question}"""
 لذلك، مُنح لك صلاحية الإجابة من معرفتك العامة، ولكن فقط إذا كان السؤال يتعلق بعلوم الحاسب، الهندسة، الرياضيات، أو الدراسات الأكاديمية.
 قواعد صارمة:
 1. إذا كان السؤال عن الرياضة، الترفيه، السياسة، أو أي موضوع خارج نطاق علوم الحاسب والمعرفة الأكاديمية، يجب أن ترفض الإجابة وترد حرفياً بالتالي: "عذراً، يمكنني فقط تقديم إجابات من المواد الدراسية أو المعرفة المتعلقة بعلوم الحاسب." ولا تضف أي معلومات أخرى.
-2. إذا كان السؤال يتعلق بعلوم الحاسب/الدراسات الأكاديمية، يجب أن تبدأ إجابتك بالتحذير التالي بالضبط:
-"⚠️ تنبيه: هذه الإجابة من معرفتي العامة وليست من ضمن المحاضرات المرفوعة، يرجى التحقق منها."
-بعد التحذير، قدم إجابة مفيدة ومنظمة وسديدة."""
+2. أجب بطريقة منظمة وسديدة ومفيدة جداً للطالب."""
+            disclaimer = "⚠️ تنبيه: هذه الإجابة من معرفتي العامة وليست من ضمن المحاضرات المرفوعة، يرجى التحقق منها.\n\n"
         else:
             sys_prompt = """You are a smart educational assistant. The current question was NOT found in the uploaded course materials.
 Therefore, you are granted permission to answer from your general knowledge, BUT ONLY if the question is related to Computer Science, Engineering, Mathematics, or Academic Studies.
 STRICT RULES:
 1. If the question is about sports, entertainment, politics, or any topic outside of Computer Science/Academic knowledge, you MUST refuse to answer and reply EXACTLY with: "Sorry, I only can provide answers from materials or computer science knowledge." Do not provide any other information.
-2. If the question IS related to Computer Science/Academics, you MUST start your answer with the EXACT disclaimer:
-"⚠️ Disclaimer: This answer is from my general knowledge and is NOT from the uploaded lectures, please verify it."
-After the disclaimer, provide a helpful, well-structured, and accurate answer."""
+2. Provide a helpful, well-structured, and accurate academic answer."""
+            disclaimer = "⚠️ Disclaimer: This answer is from my general knowledge and is NOT from the uploaded lectures, please verify it.\n\n"
 
         messages = [{"role": "system", "content": sys_prompt}]
         if history:
@@ -864,8 +889,14 @@ After the disclaimer, provide a helpful, well-structured, and accurate answer.""
             response = self.client.chat.completions.create(
                 model=self.model, messages=messages, max_tokens=1024, temperature=0.5
             )
-            return response.choices[0].message.content
+            ans = response.choices[0].message.content.strip()
+            
+            # Only append disclaimer if the LLM didn't refuse to answer
+            if "Sorry, I only can provide answers" in ans or "عذراً، يمكنني فقط تقديم إجابات" in ans:
+                return ans
+            return disclaimer + ans
         except Exception as e:
+            logger.error(f"General generator failed: {e}")
             return "Error: Failed to generate a general response."
 
     def generate_conversational_reply(self, message: str) -> str:

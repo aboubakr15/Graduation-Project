@@ -26,6 +26,47 @@ def _is_not_covered(answer: str) -> bool:
     answer_lower = answer.lower()
     return any(phrase in answer_lower for phrase in NOT_COVERED_PHRASES)
 
+# Words to strip from a query before extracting the topic phrase
+_TOPIC_STOP = {
+    'what', 'is', 'are', 'how', 'does', 'do', 'explain', 'describe', 'define',
+    'a', 'an', 'the', 'of', 'in', 'to', 'for', 'with', 'and', 'or', 'at',
+    'me', 'give', 'show', 'list', 'compare', 'discuss', 'write', 'code',
+    'implement', 'example', 'tell', 'about', 'brief', 'overview', 'introduce',
+    'when', 'where', 'who', 'which', 'why', 'can', 'you', 'please', 'summarize',
+}
+
+def _topic_phrase_in_content(rewritten_query: str, content: str) -> bool:
+    """
+    Deterministic pre-filter: checks if the key concept from the (English) rewritten
+    query appears as a phrase in the retrieved content.
+
+    Strategy — sliding 2-word window over topic words:
+      "Big Data"         → phrase "big data"        → checked in content
+      "Linear Regression" → phrase "linear regression" → checked in content
+
+    Returns True  → phrase found, proceed to LLM evaluator.
+    Returns False → phrase NOT found → definitely not covered → return "No" early.
+    Returns True (fallback) when topic extraction is ambiguous (≤1 topic word).
+    """
+    words = [w.strip('?.,!;:\'"') for w in rewritten_query.lower().split()]
+    topic_words = [w for w in words if w and w not in _TOPIC_STOP and len(w) > 2]
+
+    # Need at least 2 topic words to form a meaningful phrase
+    if len(topic_words) < 2:
+        return True  # Can't determine — let LLM decide
+
+    content_lower = content.lower()
+
+    # Check every consecutive 2-word phrase formed from topic words
+    for i in range(len(topic_words) - 1):
+        phrase = topic_words[i] + ' ' + topic_words[i + 1]
+        if phrase in content_lower:
+            return True  # The concept phrase is present — proceed to LLM
+
+    # No 2-word topic phrase found in the content → concept is absent
+    logger.info(f"Pre-filter: No topic phrase from {topic_words} found in content → 'No'")
+    return False
+
 class RAGPipeline:
     def __init__(self):
         self.document_processor = DocumentProcessor()
@@ -370,6 +411,31 @@ class RAGPipeline:
             logger.info("No course codes provided (Global/Admin mode). Searching globally.")
         # -----------------------------------------------------------------
 
+        # -----------------------------------------------------------------
+        # ★ EARLY SEMANTIC TOPIC GUARD (Student Mode Only) ★
+        # -----------------------------------------------------------------
+        # Before doing ANY retrieval, use the LLM to verify that the question
+        # is actually about a topic covered in the student's enrolled courses.
+        # This runs BEFORE retrieval so it catches cases where Big Data docs
+        # might leak through the retriever filter or where partial keyword
+        # matches mislead the evaluator.
+        #
+        # "What is Big Data" + enrolled in [Machine Learning] → NO → disclaimer
+        # "Explain Linear Regression" + enrolled in [Machine Learning] → YES → proceed
+        # -----------------------------------------------------------------
+        if is_student_mode and active_filter and active_filter != ["FORCE_EMPTY_FILTER_NO_ACCESS"]:
+            # Use human-readable names (len > 4) for the topic guard so the LLM understands
+            readable_filter = [c for c in active_filter if len(c) > 4]
+            if readable_filter:
+                logger.info(f"Topic Guard: Checking if '{rewritten_query}' is in scope of {readable_filter}")
+                on_topic = self.generator.is_enrolled_course_topic(rewritten_query, readable_filter)
+                logger.info(f"Topic Guard result: {'ON-TOPIC' if on_topic else 'OFF-TOPIC'}")
+                if not on_topic:
+                    logger.info("Topic guard: Question is off-topic for enrolled courses → routing to general answer with disclaimer.")
+                    answer = self.generator.generate_general_answer(question, history)
+                    return {"answer": answer, "sources": []}
+        # -----------------------------------------------------------------
+
         # 3. Agent Retrieval (First Pass - Enrolled Courses)
         logger.info("Agent 2 (Retriever): Fetching docs...")
         if forced_documents:
@@ -444,29 +510,50 @@ class RAGPipeline:
         # 7. Agent Evaluator: هل الداتا دي صح ولا False Positive؟
         # -----------------------------------------------------------------
         logger.info("Agent 3 (Evaluator): Checking if docs contain the answer...")
-        try:
-            evaluation = self.generator.evaluate_documents(rewritten_query, course_text)
-        except Exception as eval_err:
-            # Both Groq and OpenRouter failed during evaluation.
-            # The retrieved docs are already from enrolled courses (filtered by retriever),
-            # so skip evaluation and answer directly from them — no disclaimer needed.
-            logger.warning(f"Evaluation failed on all providers: {eval_err}. Answering from enrolled course docs.")
-            answer = self.generator.generate_answer(
-                question, full_context, is_youtube=bool(youtube_data), history=history
-            )
-            
-            if _is_not_covered(answer):
-                logger.warning("Generator returned NOT_COVERED during fallback. Overriding evaluation to 'No'.")
+        
+        # Fast-path bypass: Only bypass the evaluator if the question is PRIMARILY about
+        # an enrolled course name itself (e.g. "explain machine learning", "summarize ML").
+        # We do NOT bypass if the course name is just a qualifier phrase like
+        # "What is Big Data in Machine Learning" — that would skip evaluation for off-topic questions.
+        is_explicit_course_q = False
+        rq_lower = rewritten_query.lower().strip()
+        # Phrases that indicate the course name is just a contextual modifier, not the subject
+        course_as_modifier_patterns = [" in ", " from ", " of ", " for ", " about ", " on ", " related to "]
+        for course in active_filter:
+            clean_course = course.split('-')[0].strip().lower()
+            if len(clean_course) <= 4:
+                continue
+            # The query must START with or be dominated by the course name — not have it as a suffix modifier
+            if clean_course in rq_lower:
+                # Check if the course name appears ONLY as a trailing modifier phrase
+                is_only_modifier = any(
+                    f"{pat}{clean_course}" in rq_lower
+                    for pat in course_as_modifier_patterns
+                )
+                if not is_only_modifier:
+                    is_explicit_course_q = True
+                    break
+        
+        if is_explicit_course_q and documents:
+            logger.info("Query explicitly mentions an enrolled course. Bypassing evaluator -> Yes.")
+            evaluation = "Yes"
+        else:
+            # ── Deterministic phrase pre-filter (fast, no LLM cost) ──────────
+            # If the key concept phrase from the query doesn't appear anywhere in
+            # the retrieved content, we can immediately return "No" without
+            # wasting an LLM call on an obvious false-positive retrieval.
+            phrase_present = _topic_phrase_in_content(rewritten_query, course_text)
+            if not phrase_present:
+                logger.info("Pre-filter fired: concept phrase absent from content → evaluation = No")
                 evaluation = "No"
             else:
-                seen_sources = set()
-                unique_sources = []
-                for doc in documents:
-                    file_name = doc.metadata.get('file_name', 'unknown')
-                    if file_name not in seen_sources and file_name != 'unknown':
-                        seen_sources.add(file_name)
-                        unique_sources.append({"title": file_name})
-                return {"answer": answer, "sources": unique_sources}
+                # Phrase found in content — ask LLM to verify
+                try:
+                    evaluation = self.generator.evaluate_documents(rewritten_query, course_text)
+                except Exception as eval_err:
+                    logger.warning(f"Evaluation failed on all providers: {eval_err}. Defaulting evaluation to 'No' to be safe.")
+                    evaluation = "No"
+        
         logger.info(f"Evaluation Result: {evaluation}")
 
         # -----------------------------------------------------------------
