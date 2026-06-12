@@ -423,7 +423,7 @@ class RAGPipeline:
         # "What is Big Data" + enrolled in [Machine Learning] → NO → disclaimer
         # "Explain Linear Regression" + enrolled in [Machine Learning] → YES → proceed
         # -----------------------------------------------------------------
-        if is_student_mode and active_filter and active_filter != ["FORCE_EMPTY_FILTER_NO_ACCESS"]:
+        if is_student_mode and active_filter and active_filter != ["FORCE_EMPTY_FILTER_NO_ACCESS"] and not youtube_data:
             # Use human-readable names (len > 4) for the topic guard so the LLM understands
             readable_filter = [c for c in active_filter if len(c) > 4]
             if readable_filter:
